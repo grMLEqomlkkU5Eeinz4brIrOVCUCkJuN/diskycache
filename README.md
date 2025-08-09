@@ -3,7 +3,7 @@
 [![npm version](https://img.shields.io/npm/v/diskycache.svg)](https://www.npmjs.com/package/diskycache)
 [![license](https://img.shields.io/npm/l/diskycache.svg)](LICENSE)
 
-A simple, efficient **disk-backed cache** library for Node.js — designed to cache files of any type on disk with configurable size and age limits. Ideal for applications needing persistent caching with controlled storage size and expiration.
+A simple, efficient **disk-backed cache** library for Node.js - designed to cache files of any type on disk with configurable size and age limits. Ideal for applications needing persistent caching with controlled storage size and expiration.
 
 ---
 

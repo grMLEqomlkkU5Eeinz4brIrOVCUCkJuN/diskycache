@@ -1,8 +1,13 @@
 name: CD - Publish Package
 
 on:
-  release:
-    types: [published]
+  push:
+    branches:
+      - master
+      - dev
+  pull_request:
+    branches:
+      - master
 
 jobs:
   publish:

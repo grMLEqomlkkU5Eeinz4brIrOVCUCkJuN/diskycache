@@ -1,0 +1,36 @@
+{
+	"name": "diskycache",
+	"version": "1.0.0",
+	"module": "index.ts",
+	"main": "dist/index.js",
+	"types": "dist/index.d.ts",
+	"scripts": {
+		"build": "npx tsc",
+		"build:watch": "npx tsc --watch",
+		"dev": "ts-node src/index.ts",
+		"test": "jest",
+		"test:watch": "jest --watch",
+		"test:coverage": "jest --coverage",
+		"benchmark": "ts-node benchmark/benchmark",
+		"clean": "rimraf dist/",
+		"prepublishOnly": "npm run clean && npm run build && npm test",
+		"prepack": "npm run build"
+	},
+	"devDependencies": {
+		"@types/jest": "^30.0.0",
+		"@types/node": "^24.2.1",
+		"benchmark": "^2.1.4",
+		"bun-types": "latest",
+		"eslint": "^9.32.0",
+		"jest": "^30.0.5",
+		"rimraf": "^6.0.1",
+		"ts-jest": "^29.4.1",
+		"ts-node": "^10.9.2",
+		"tsup": "^8.5.0",
+		"typescript-eslint": "^8.39.0"
+	},
+	"peerDependencies": {
+		"typescript": "^5.0.0"
+	},
+	"type": "commonjs"
+}

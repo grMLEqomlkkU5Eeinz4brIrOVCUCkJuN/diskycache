@@ -16,6 +16,6 @@ export interface StatisticData {
 	averageAccessesPerEntry: number;
 	oldestEntryDate: string | undefined;
 	newestEntryDate: string | undefined,
-	maxCacheAgeDays: number; // this will need to be updated in the future
+	maxCacheAgeDays: number;
 	usagePercentage: number;
 }

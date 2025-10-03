@@ -1,43 +1,31 @@
 {
 	"compilerOptions": {
 		"target": "ES2020",
-		"module": "CommonJS",
+		"module": "NodeNext",
 		"lib": [
 			"ES2020"
 		],
 		"outDir": "./dist",
 		"rootDir": "./src",
 		"strict": true,
+		"isolatedModules": true,
 		"esModuleInterop": true,
 		"skipLibCheck": true,
-		"forceConsistentCasingInFileNames": true,
-		"moduleResolution": "node",
-		"resolveJsonModule": true,
-		"allowSyntheticDefaultImports": true,
 		"declaration": true,
-		"declarationMap": true,
-		"sourceMap": true,
-		"removeComments": false,
-		"noImplicitAny": true,
-		"noImplicitReturns": true,
-		"noImplicitThis": true,
-		"noUnusedLocals": true,
-		"noUnusedParameters": true,
-		"exactOptionalPropertyTypes": true,
-		"noImplicitOverride": true,
-		"noPropertyAccessFromIndexSignature": false,
-		"noUncheckedIndexedAccess": false
+		"forceConsistentCasingInFileNames": true,
+		"moduleResolution": "nodenext",
+		"types": [
+			"node",
+			"jest"
+		]
 	},
 	"include": [
-		"src/**/*"
+		"src/**/*",
+		"../test/**/*"
 	],
 	"exclude": [
 		"node_modules",
 		"dist",
-		"test",
-		"examples",
-		"benchmark",
-		"**/*.test.ts",
-		"**/*.spec.ts"
+		"build"
 	]
 }

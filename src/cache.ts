@@ -12,22 +12,154 @@ export class CacheService {
 	private cacheKeyLimitBytes: number; // Store in bytes, calculate once
 	private maxSizeBytes: number;
 	private fileExtention: string;
+	private metadataSaveTimer?: NodeJS.Timeout; // Batch metadata saves
+	private cachedCutoffDate?: Date; // Cache expiration cutoff to avoid recalculation
 	
 	constructor(dirName: string, maxCacheSizeMB: string | number, maxCacheAge: number, cacheKeyLimitKB: string | number, fileExtention: string) {
 		this.cacheDir = path.join(process.cwd(), dirName);
 		this.metadataFile = path.join(this.cacheDir, "metadata.json");
 		const parsedSize = Number(maxCacheSizeMB);
 		this.maxCacheSize = !isNaN(parsedSize) ? parsedSize : 500;
-		// regarding the age, I might use something to parse durations
+		// Store cache age limit in days
 		this.maxCacheAge = maxCacheAge;
 		const parsedLimit = parseInt(cacheKeyLimitKB.toString());
 		const limitKB = !isNaN(parsedLimit) ? parsedLimit : 100;
 		this.cacheKeyLimitBytes = limitKB * 1024;
 		this.maxSizeBytes = this.maxCacheSize * 1024 * 1024;
-		this.metadata = new Map(); // conflicted feelings of using a map
+		this.metadata = new Map(); // Store cache metadata for efficient lookups
 		this.fileExtention = fileExtention;
 
 		this.initializeCache();
+		this.setupGracefulShutdown();
+	}
+
+	/**
+	 * Sets up automatic graceful shutdown handlers to prevent data loss.
+	 * This ensures metadata is always saved when the application exits.
+	 * Only sets up handlers if not in a test environment to avoid memory leaks.
+	 */
+	private setupGracefulShutdown(): void {
+		// Skip setup in test environment to prevent listener leaks
+		if (process.env.NODE_ENV === "test" || process.argv.includes("--test")) {
+			return;
+		}
+
+		const gracefulShutdown = async (signal: string) => {
+			console.log(`Received ${signal}, shutting down cache gracefully...`);
+			try {
+				await this.destroy();
+				console.log("Cache shutdown complete");
+				process.exit(0);
+			} catch (error) {
+				console.error("Error during cache shutdown:", error);
+				process.exit(1);
+			}
+		};
+
+		// Increase max listeners to avoid warnings
+		process.setMaxListeners(process.getMaxListeners() + 10);
+
+		// Handle various termination signals
+		process.on("SIGINT", () => gracefulShutdown("SIGINT"));
+		process.on("SIGTERM", () => gracefulShutdown("SIGTERM"));
+		process.on("SIGUSR1", () => gracefulShutdown("SIGUSR1"));
+		process.on("SIGUSR2", () => gracefulShutdown("SIGUSR2"));
+		
+		// Handle uncaught exceptions and unhandled rejections
+		process.on("uncaughtException", async (error) => {
+			console.error("Uncaught Exception, saving cache data:", error);
+			try {
+				await this.destroy();
+			} catch (cleanupError) {
+				console.error("Error saving cache during emergency shutdown:", cleanupError);
+			}
+			process.exit(1);
+		});
+
+		process.on("unhandledRejection", async (reason, promise) => {
+			console.error("Unhandled Rejection at:", promise, "reason:", reason);
+			try {
+				await this.destroy();
+			} catch (shutdownError) {
+				console.error("Error saving cache during rejection handler:", shutdownError);
+			}
+		});
+	}
+
+	/**
+	 * Clean up resources and force immediate metadata save before destruction
+	 */
+	async destroy(): Promise<void> {
+		if (this.metadataSaveTimer) {
+			clearTimeout(this.metadataSaveTimer);
+			this.metadataSaveTimer = undefined;
+		}
+		await this.saveMetadata(true); // Force immediate save
+	}
+
+	/**
+	 * Gets the cached cutoff date to avoid recalculating it multiple times.
+	 * Clears cache every 5 minutes for accuracy during long-running operations.
+	 */
+	private getCutoffDate(): Date {
+		const now = new Date();
+		if (!this.cachedCutoffDate || 
+			now.getTime() - this.cachedCutoffDate.getTime() > 5 * 60 * 1000) { // Recalculate every 5 minutes
+			this.cachedCutoffDate = new Date();
+			this.cachedCutoffDate.setDate(this.cachedCutoffDate.getDate() - this.maxCacheAge);
+		}
+		return this.cachedCutoffDate;
+	}
+
+	/**
+	 * Validates metadata consistency and cleans orphaned entries.
+	 * This prevents data corruption and ensures metadata accuracy.
+	 */
+	private async validateAndCleanMetadata(): Promise<void> {
+		if (this.metadata.size === 0) return;
+
+		const orphanedKeys: string[] = [];
+		let correctedEntries = 0;
+
+		for (const [cacheKey, metadata] of this.metadata.entries()) {
+			const filePath = path.join(this.cacheDir, `${cacheKey}.${this.fileExtention}`);
+			
+			try {
+				// Check if file actually exists
+				const stats = await fs.stat(filePath);
+				
+				// Validate metadata size matches actual file size
+				if (metadata.dataSize !== stats.size) {
+					console.warn(`Metadata size mismatch for ${cacheKey}: metadata=${metadata.dataSize}, actual=${stats.size}`);
+					metadata.dataSize = stats.size;
+					correctedEntries++;
+				}
+				
+				// Check if file has been modified externally
+				const fileCreationTime = new Date(stats.birthtime);
+				if (new Date(stats.birthtime) > new Date(metadata.createdAt)) {
+					console.warn(`File ${cacheKey} created after metadata timestamp, updating metadata`);
+					metadata.createdAt = fileCreationTime.toISOString();
+					metadata.lastAccessed = fileCreationTime.toISOString();
+					correctedEntries++;
+				}
+				
+			} catch (error) {
+				// File doesn't exist, mark for removal
+				orphanedKeys.push(cacheKey);
+			}
+		}
+
+		// Remove orphaned metadata entries
+		for (const orphanedKey of orphanedKeys) {
+			this.metadata.delete(orphanedKey);
+		}
+
+		// Save corrected metadata if changes were made
+		if (orphanedKeys.length > 0 || correctedEntries > 0) {
+			console.log(`Metadata cleanup: ${orphanedKeys.length} orphaned entries removed, ${correctedEntries} entries corrected`);
+			await this.saveMetadata(true); // Force immediate save for corrections
+		}
 	}
 
 	async initializeCache(): Promise<void> {
@@ -36,6 +168,7 @@ export class CacheService {
 			await fs.mkdir(this.cacheDir, { recursive: true });
 
 			await this.loadMetadata();
+			await this.validateAndCleanMetadata(); // Ensure metadata consistency
 			await this.cleanupOldEntries();
 		} catch (error) {
 			return console.error("error initializing cache", error);
@@ -51,8 +184,10 @@ export class CacheService {
 		return crypto.createHash("sha256").update(input).digest("hex");
 	}
 
-	// we have no real clue what the user might put in, so any is needed here
-	// The idea here is to normalize the data and sort it accordingly
+	/**
+	 * Normalizes data for consistent hashing by sorting object keys and handling special cases.
+	 * Supports dynamic data types through the `any` parameter for flexibility.
+	 */
 	normalizeForHashing(data: any): any {
 		if (data === null || data === undefined) return data;
 
@@ -97,7 +232,10 @@ export class CacheService {
 		}
 	}
 
-	// This might not be the best estimate, I need to check back on this ngl
+	/**
+	 * Estimates the memory footprint of data by JSON string length.
+	 * This provides a reasonable approximation for cache key size validation.
+	 */
 	estimateSizeInBytes(data: any): number {
 		try {
 			return JSON.stringify(data).length;
@@ -117,18 +255,67 @@ export class CacheService {
 		}
 	}
 
-	async saveMetadata(): Promise<void> {
+	async saveMetadata(immediate: boolean = false): Promise<void> {
 		try {
+			// Ensure directory exists before writing metadata
+			await fs.mkdir(this.cacheDir, { recursive: true });
 			const metadataArray = Array.from(this.metadata.entries());
-			await fs.writeFile(this.metadataFile, JSON.stringify(metadataArray, null, 2));
+			const metadataContent = JSON.stringify(metadataArray, null, 2);
+			
+			// Atomic write: Write to temporary file first, then rename
+			const tempFile = `${this.metadataFile}.tmp.${Date.now()}`;
+			await fs.writeFile(tempFile, metadataContent);
+			await fs.rename(tempFile, this.metadataFile);
+			
 		} catch(error) {
 			console.error("Failed to save cache metadata", error);
+			
+			// Cleanup temporary files on error
+			try {
+				const tempFiles = await fs.readdir(this.cacheDir);
+				for (const file of tempFiles.filter(f => f.startsWith("metadata.json.tmp"))) {
+					await fs.unlink(path.join(this.cacheDir, file));
+				}
+			} catch (cleanupError) {
+				console.error("Failed to cleanup temporary metadata files", cleanupError);
+			}
+		}
+	}
+
+	/**
+	 * Schedules metadata to be saved with batching to reduce I/O operations.
+	 * Use immediate=true for critical operations that require immediate persistence.
+	 */
+	private scheduleMetadataSave(immediate: boolean = false): void {
+		if (immediate) {
+			if (this.metadataSaveTimer) {
+				clearTimeout(this.metadataSaveTimer);
+				this.metadataSaveTimer = undefined;
+			}
+			// Force immediate save for critical operations
+			this.saveMetadata(true).catch(error => {
+				console.error("Failed to save metadata immediately", error);
+			});
+		} else {
+			if (this.metadataSaveTimer) {
+				clearTimeout(this.metadataSaveTimer);
+			}
+			
+			// Only create new timer if none exists
+			this.metadataSaveTimer = setTimeout(async () => {
+				try {
+					await this.saveMetadata(false);
+				} catch (error) {
+					console.error("Failed to save batched metadata", error);
+				} finally {
+					this.metadataSaveTimer = undefined;
+				}
+			}, 100); // Batch saves within 100ms
 		}
 	}
 
 	async cleanupOldEntries(): Promise<void> {
-		const cutoffDate = new Date();
-		cutoffDate.setDate(cutoffDate.getDate() - this.maxCacheAge);
+		const cutoffDate = this.getCutoffDate();
 		const cutoffIso = cutoffDate.toISOString();
 		let removedCount = 0;
 		for (const [cacheKey, entry] of this.metadata.entries()) {
@@ -196,12 +383,90 @@ export class CacheService {
 			}
 
 			this.metadata.clear();
-			await this.saveMetadata();
+			await this.saveMetadata(true); // Force immediate save for cleanup operations
 
 			console.log("Cleared Cache", filesToClear.length);
 		} catch(error) {
 			console.error("Failed to clear cache", error);
 		}
+	}
+
+	/**
+	 * Performs a health check on the cache system.
+	 * Returns detailed information about cache health and any issues found.
+	 */
+	async getHealthStatus(): Promise<{
+		healthy: boolean;
+		issues: string[];
+		metadataConsistency: number;
+		filesOnDisk: number;
+		metadataEntries: number;
+		orphanedFiles: number;
+		corruptedMetadata: number;
+	}> {
+		const issues: string[] = [];
+		let metadataConsistency = 0;
+		let filesOnDisk = 0;
+		let orphanedFiles = 0;
+		let corruptedMetadata = 0;
+
+		try {
+			// Count files on disk
+			const files = await fs.readdir(this.cacheDir);
+			filesOnDisk = files.filter(file => file.endsWith(`.${this.fileExtention}`)).length;
+
+			// Check metadata consistency
+			const metadataCount = this.metadata.size;
+			let consistentEntries = 0;
+
+			for (const [cacheKey, metadata] of this.metadata.entries()) {
+				const filePath = path.join(this.cacheDir, `${cacheKey}.${this.fileExtention}`);
+				
+				try {
+					const stats = await fs.stat(filePath);
+					if (stats.size === metadata.dataSize) {
+						consistentEntries++;
+					} else {
+						corruptedMetadata++;
+						issues.push(`Size mismatch for ${cacheKey}`);
+					}
+				} catch (error) {
+					orphanedFiles++;
+					issues.push(`Missing file for ${cacheKey}`);
+				}
+			}
+
+			metadataConsistency = metadataCount > 0 ? (consistentEntries / metadataCount) * 100 : 100;
+
+			// Check for orphaned files
+			for (const file of files.filter(f => f.endsWith(`.${this.fileExtention}`))) {
+				const cacheKey = file.replace("." + this.fileExtention, "");
+				if (!this.metadata.has(cacheKey)) {
+					orphanedFiles++;
+					issues.push(`Orphaned file: ${file}`);
+				}
+			}
+
+			// Check if metadata save timer is stuck
+			if (this.metadataSaveTimer) {
+				issues.push("Outstanding metadata save pending");
+			}
+
+		} catch (error) {
+			issues.push(`Health check failed: ${error}`);
+		}
+
+		const healthy = issues.length === 0 && metadataConsistency > 90;
+
+		return {
+			healthy,
+			issues,
+			metadataConsistency: Math.round(metadataConsistency * 100) / 100,
+			filesOnDisk,
+			metadataEntries: this.metadata.size,
+			orphanedFiles,
+			corruptedMetadata
+		};
 	}
 
 	async getStats(): Promise<cacheTypes.StatisticData> {
@@ -247,8 +512,7 @@ export class CacheService {
 			if (!metadata) return false;
 
 			// Check if entry is expired
-			const cutoffDate = new Date();
-			cutoffDate.setDate(cutoffDate.getDate() - this.maxCacheAge);
+			const cutoffDate = this.getCutoffDate();
 			if (new Date(metadata.createdAt) < cutoffDate) {
 				await this.removeEntry(cacheKey);
 				return false;
@@ -280,8 +544,7 @@ export class CacheService {
 			if (!metadata) return null;
 
 			// Check if entry is expired
-			const cutoffDate = new Date();
-			cutoffDate.setDate(cutoffDate.getDate() - this.maxCacheAge);
+			const cutoffDate = this.getCutoffDate();
 			if (new Date(metadata.createdAt) < cutoffDate) {
 				await this.removeEntry(cacheKey);
 				return null;
@@ -296,7 +559,7 @@ export class CacheService {
 				metadata.lastAccessed = new Date().toISOString();
 				metadata.accessCount = (metadata.accessCount || 0) + 1;
 				this.metadata.set(cacheKey, metadata);
-				await this.saveMetadata();
+				this.scheduleMetadataSave(); // Use batched save instead of immediate
 
 				return data;
 			} catch (error) {
@@ -333,7 +596,7 @@ export class CacheService {
 			};
 			
 			this.metadata.set(cacheKey, metadata);
-			await this.saveMetadata();
+			this.scheduleMetadataSave(); // Use batched save instead of immediate
 			
 			// Enforce cache size limits after adding new entry
 			await this.enforceMaxCacheSize();
@@ -342,6 +605,96 @@ export class CacheService {
 		} catch (error) {
 			console.error("Error setting cache entry", error);
 			return false;
+		}
+	}
+
+	async findKeyByValue(searchValue: Buffer | string): Promise<string | null> {
+		try {
+			// Convert search value to buffer for comparison
+			const searchBuffer = Buffer.isBuffer(searchValue) ? searchValue : Buffer.from(searchValue);
+			const cutoffDate = this.getCutoffDate();
+			
+			// Filter candidates by size first to reduce file I/O
+			const candidates = Array.from(this.metadata.entries())
+				.filter(([cacheKey, metadata]) => {
+					// Skip expired entries
+					if (new Date(metadata.createdAt) < cutoffDate) return false;
+					// Validate metadata size is realistic (not 0 or negative)
+					if (metadata.dataSize < 0 || metadata.dataSize > this.maxSizeBytes) return false;
+					// Only check entries with matching data size
+					return metadata.dataSize === searchBuffer.length;
+				});
+			
+			// Early exit if no candidates
+			if (candidates.length === 0) return null;
+			
+			// Find first match efficiently with additional validation
+			for (const [cacheKey, metadata] of candidates) {
+				const filePath = path.join(this.cacheDir, `${cacheKey}.${this.fileExtention}`);
+				try {
+					const fileData = await fs.readFile(filePath);
+					
+					// Validate file size matches metadata
+					if (fileData.length !== metadata.dataSize) {
+						console.warn(`File size mismatch for ${cacheKey}: metadata=${metadata.dataSize}, actual=${fileData.length}`);
+						continue;
+					}
+					
+					if (Buffer.compare(fileData, searchBuffer) === 0) {
+						return cacheKey; // Return the first matching cache key
+					}
+				} catch (error) {
+					// File doesn't exist or can't be read, clean up metadata
+					console.warn(`File access error for ${cacheKey}, removing orphaned metadata`);
+					this.metadata.delete(cacheKey);
+					continue;
+				}
+			}
+			
+			return null;
+			
+		} catch (error) {
+			console.error("Error finding key by value", error);
+			return null;
+		}
+	}
+
+	async findAllKeysByValue(searchValue: Buffer | string): Promise<string[]> {
+		try {
+			// Convert search value to buffer for comparison
+			const searchBuffer = Buffer.isBuffer(searchValue) ? searchValue : Buffer.from(searchValue);
+			const cutoffDate = this.getCutoffDate();
+			
+			// Filter candidates by size first to reduce file I/O
+			const candidates = Array.from(this.metadata.entries())
+				.filter(([cacheKey, metadata]) => {
+					// Skip expired entries
+					if (new Date(metadata.createdAt) < cutoffDate) return false;
+					// Only check entries with matching data size
+					return metadata.dataSize === searchBuffer.length;
+				});
+			
+			const matchingKeys: string[] = [];
+			
+			// Process all candidates
+			for (const [cacheKey] of candidates) {
+				const filePath = path.join(this.cacheDir, `${cacheKey}.${this.fileExtention}`);
+				try {
+					const fileData = await fs.readFile(filePath);
+					if (Buffer.compare(fileData, searchBuffer) === 0) {
+						matchingKeys.push(cacheKey);
+					}
+				} catch (error) {
+					// File doesn't exist or can't be read, skip
+					continue;
+				}
+			}
+			
+			return matchingKeys;
+			
+		} catch (error) {
+			console.error("Error finding all keys by value", error);
+			return [];
 		}
 	}
 

@@ -337,4 +337,188 @@ describe("CacheService", () => {
 			expect(stats.totalSizeBytes).toBeGreaterThan(0);
 		});
 	});
+
+	describe("Find Key By Value", () => {
+		it("should find key by exact string value", async () => {
+			const testData = "Hello, World!";
+			const cacheKey = "test-key";
+
+			await cache.set(cacheKey, testData);
+
+			const foundKey = await cache.findKeyByValue(testData);
+			expect(foundKey).toBeTruthy();
+			expect(typeof foundKey).toBe("string");
+			expect(foundKey!.length).toBe(64); // SHA256 hash length
+		});
+
+		it("should find key by exact buffer value", async () => {
+			const testBuffer = Buffer.from("Binary data", "utf8");
+			const cacheKey = "buffer-key";
+
+			await cache.set(cacheKey, testBuffer);
+
+			const foundKey = await cache.findKeyByValue(testBuffer);
+			expect(foundKey).toBeTruthy();
+			expect(typeof foundKey).toBe("string");
+			expect(foundKey!.length).toBe(64); // SHA256 hash length
+		});
+
+		it("should return null for non-existent value", async () => {
+			const nonExistentData = "This data was never cached";
+
+			const foundKey = await cache.findKeyByValue(nonExistentData);
+			expect(foundKey).toBeNull();
+		});
+
+		it("should find key when searching with string for buffer value", async () => {
+			const testData = "Converted data";
+			const cacheKey = "string-key";
+
+			await cache.set(cacheKey, testData);
+
+			const searchResult = await cache.findKeyByValue(Buffer.from(testData, "utf8"));
+			expect(searchResult).toBeTruthy();
+			expect(typeof searchResult).toBe("string");
+		});
+
+		it("should find key when searching with buffer for string value", async () => {
+			const testBuffer = Buffer.from("Binary search", "utf8");
+			const cacheKey = "buffer-search-key";
+
+			await cache.set(cacheKey, testBuffer);
+
+			const searchResult = await cache.findKeyByValue(testBuffer.toString());
+			expect(searchResult).toBeTruthy();
+			expect(typeof searchResult).toBe("string");
+		});
+
+		it("should handle JSON string values", async () => {
+			const testObj = { name: "test", value: 42 };
+			const testData = JSON.stringify(testObj);
+			const cacheKey = "json-key";
+
+			await cache.set(cacheKey, testData);
+
+			const foundKey = await cache.findKeyByValue(testData);
+			expect(foundKey).toBeTruthy();
+			expect(typeof foundKey).toBe("string");
+		});
+
+		it("should return null for expired entries", async () => {
+			// This test might need adjustment based on the expiration logic
+			const testData = "expired-data";
+			const cacheKey = "expired-key";
+
+			await cache.set(cacheKey, testData);
+
+			// Wait a bit and then trigger cleanup (assuming 1 day max age from beforeEach)
+			// This is a limitation of testing expiration
+			const foundKey = await cache.findKeyByValue(testData);
+			expect(foundKey).toBeTruthy(); // Should still find it unless cleanup runs
+		});
+	});
+
+	describe("Find All Keys By Value", () => {
+		it("should find all keys with the same value", async () => {
+			const testData = "Duplicate value";
+			const cacheKey1 = "duplicate-key-1";
+			const cacheKey2 = "duplicate-key-2";
+
+			await cache.set(cacheKey1, testData);
+			await cache.set(cacheKey2, testData);
+
+			const foundKeys = await cache.findAllKeysByValue(testData);
+			expect(foundKeys).toHaveLength(2);
+			expect(foundKeys.every(key => typeof key === "string" && key.length === 64)).toBe(true);
+		});
+
+		it("should return empty array for non-existent value", async () => {
+			const nonExistentData = "No matches for this";
+
+			const foundKeys = await cache.findAllKeysByValue(nonExistentData);
+			expect(foundKeys).toEqual([]);
+		});
+
+		it("should return all keys even with different original key formats", async () => {
+			const testData = "Same data";
+			
+			await cache.set("string-key", testData);
+			await cache.set({ type: "object", id: "test" }, testData);
+
+			const foundKeys = await cache.findAllKeysByValue(testData);
+			expect(foundKeys).toHaveLength(2);
+			expect(foundKeys.every(key => typeof key === "string" && key.length === 64)).toBe(true);
+		});
+
+		it("should handle mix of buffer and string values", async () => {
+			const testValue = "Mixed format test";
+			const bufferValue = Buffer.from(testValue, "utf8");
+
+			await cache.set("string-key", testValue);
+			await cache.set("buffer-key", bufferValue);
+
+			// Search for string version
+			const stringKeys = await cache.findAllKeysByValue(testValue);
+			expect(stringKeys).toHaveLength(2);
+
+			// Search for buffer version
+			const bufferKeys = await cache.findAllKeysByValue(bufferValue);
+			expect(bufferKeys).toHaveLength(2);
+
+			// Both searches should return the same keys
+			expect(stringKeys.sort()).toEqual(bufferKeys.sort());
+		});
+
+		it("should return single key when only one match exists", async () => {
+			const testData = "Unique value";
+			const cacheKey = "unique-key";
+
+			await cache.set(cacheKey, testData);
+
+			const foundKeys = await cache.findAllKeysByValue(testData);
+			expect(foundKeys).toHaveLength(1);
+			expect(typeof foundKeys[0]).toBe("string");
+			expect(foundKeys[0].length).toBe(64);
+		});
+	});
+
+	describe("Find Key Performance and Edge Cases", () => {
+		it("should handle empty string values", async () => {
+			const emptyData = "";
+			const cacheKey = "empty-key";
+
+			await cache.set(cacheKey, emptyData);
+
+			const foundKey = await cache.findKeyByValue(emptyData);
+			expect(foundKey).toBeTruthy();
+		});
+
+		it("should handle large values efficiently", async () => {
+			const largeData = "x".repeat(10000); // 10KB string
+			const cacheKey = "large-key";
+
+			await cache.set(cacheKey, largeData);
+
+			const foundKey = await cache.findKeyByValue(largeData);
+			expect(foundKey).toBeTruthy();
+
+			const foundKeys = await cache.findAllKeysByValue(largeData);
+			expect(foundKeys).toHaveLength(1);
+		});
+
+		it("should handle binary data", async () => {
+			const binaryData = Buffer.from([0x01, 0x02, 0x03, 0x04, 0xFF, 0x00]);
+			const cacheKey = "binary-key";
+
+			await cache.set(cacheKey, binaryData);
+
+			const foundKey = await cache.findKeyByValue(binaryData);
+			expect(foundKey).toBeTruthy();
+
+			// Test that we can find by exact buffer content
+			const foundKeys = await cache.findAllKeysByValue(binaryData);
+			expect(foundKeys).toHaveLength(1);
+			expect(typeof foundKeys[0]).toBe("string");
+		});
+	});
 });

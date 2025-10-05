@@ -1,0 +1,17 @@
+dist/
+node_modules/
+cache_test_dir/
+test-cache/
+coverage/
+*.log
+.DS_Store
+.vscode/
+.idea/
+*.tmp
+*.swp
+benchmark/
+.github/
+test
+LICENSE
+README.md
+docs

@@ -112,17 +112,91 @@ const foundKey = await cache.findKeyByValuel(Buffer.from([0x01, 0x02]));
 
 ### `findAllKeysByValue(searchValue): Promise<string[]>`
 
-Finds all cache keys associated with a specific value.
+Finds all cache keys associated with a specific value using index-based lookup.
 
 **Parameters:**
 - `searchValue`: `Buffer | string` - Value to search for
 
 **Returns:** `Promise<string[]>` - Array of matching hash keys
 
+**Performance:** O(1) for indexed content, O(n) for non-indexed content
+
 **Example:**
 ```ts
 const allKeys = await cache.findAllKeysByValue("shared_data");
 console.log(`Found ${allKeys.length} keys with same value`);
+```
+
+### `findKeysBySize(dataSize: number): Promise<string[]>`
+
+Finds all cache keys with the specified data size using size index.
+
+**Parameters:**
+- `dataSize`: `number` - File size in bytes
+
+**Returns:** `Promise<string[]>` - Array of cache keys with specified size
+
+**Performance:** O(1) lookup time
+
+**Example:**
+```ts
+const smallFiles = await cache.findKeysBySize(1024); // 1KB files
+const largeFiles = await cache.findKeysBySize(1024 * 1024); // 1MB files
+```
+
+### `findKeysByDate(date: string): Promise<string[]>`
+
+Finds all cache keys created on the specified date using date index.
+
+**Parameters:**
+- `date`: `string` - Date in YYYY-MM-DD format
+
+**Returns:** `Promise<string[]>` - Array of cache keys created on specified date
+
+**Performance:** O(1) lookup time
+
+**Example:**
+```ts
+const today = new Date().toISOString().split('T')[0];
+const todayFiles = await cache.findKeysByDate(today);
+const specificFiles = await cache.findKeysByDate("2024-01-15");
+```
+
+### `findKeysByAccessCount(accessCount: number): Promise<string[]>`
+
+Finds all cache keys with the specified access count using access count index.
+
+**Parameters:**
+- `accessCount`: `number` - Number of access times
+
+**Returns:** `Promise<string[]>` - Array of cache keys with specified access count
+
+**Performance:** O(1) lookup time
+
+**Example:**
+```ts
+const hotFiles = await cache.findKeysByAccessCount(10); // Frequently accessed
+const unusedFiles = await cache.findKeysByAccessCount(0); // Never accessed
+```
+
+### `getIndexStats(): IndexStats`
+
+Returns statistics about the cache index system.
+
+**Returns:** `IndexStats` object with:
+- `contentHashIndexSize`: `number` - Number of content hash index entries
+- `sizeIndexSize`: `number` - Number of size index entries
+- `dateIndexSize`: `number` - Number of date index entries
+- `accessCountIndexSize`: `number` - Number of access count index entries
+- `totalIndexedKeys`: `number` - Total number of indexed keys
+
+**Performance:** O(1) lookup time
+
+**Example:**
+```ts
+const stats = cache.getIndexStats();
+console.log(`Content hash index: ${stats.contentHashIndexSize} entries`);
+console.log(`Size index: ${stats.sizeIndexSize} entries`);
 ```
 
 ## Management Operations
@@ -316,6 +390,17 @@ interface HealthStatus {
     metadataEntries: number;      // Metadata entries
     orphanedFiles: number;        // Orphaned files
     corruptedMetadata: number;    // Corrupted entries
+}
+```
+
+### `IndexStats`
+```ts
+interface IndexStats {
+    contentHashIndexSize: number;    // Content hash index entries
+    sizeIndexSize: number;           // Size index entries
+    dateIndexSize: number;           // Date index entries
+    accessCountIndexSize: number;    // Access count index entries
+    totalIndexedKeys: number;        // Total indexed keys
 }
 ```
 

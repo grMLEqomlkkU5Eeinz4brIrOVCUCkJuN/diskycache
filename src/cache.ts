@@ -14,6 +14,13 @@ export class CacheService {
 	private fileExtention: string;
 	private metadataSaveTimer?: NodeJS.Timeout; // Batch metadata saves
 	private cachedCutoffDate?: Date; // Cache expiration cutoff to avoid recalculation
+	private contentHashCache?: Map<string, string>; // Cache for content hashes to avoid re-reading files
+	
+	// Index system for fast lookups
+	private contentHashIndex?: Map<string, Set<string>>; // content hash -> set of cache keys
+	private sizeIndex?: Map<number, Set<string>>; // data size -> set of cache keys
+	private dateIndex?: Map<string, Set<string>>; // date (YYYY-MM-DD) -> set of cache keys
+	private accessCountIndex?: Map<number, Set<string>>; // access count -> set of cache keys
 	
 	constructor(dirName: string, maxCacheSizeMB: string | number, maxCacheAge: number, cacheKeyLimitKB: string | number, fileExtention: string) {
 		this.cacheDir = path.join(process.cwd(), dirName);
@@ -28,6 +35,13 @@ export class CacheService {
 		this.maxSizeBytes = this.maxCacheSize * 1024 * 1024;
 		this.metadata = new Map(); // Store cache metadata for efficient lookups
 		this.fileExtention = fileExtention;
+		this.contentHashCache = new Map(); // Initialize content hash cache
+		
+		// Initialize index system
+		this.contentHashIndex = new Map();
+		this.sizeIndex = new Map();
+		this.dateIndex = new Map();
+		this.accessCountIndex = new Map();
 
 		this.initializeCache();
 		this.setupGracefulShutdown();
@@ -368,7 +382,17 @@ export class CacheService {
 		try {
 			const filePath = path.join(this.cacheDir, `${cacheKey}.${this.fileExtention}`);
 			await fs.unlink(filePath).catch(() => {}); // Ignore if files does not exist
+			
+			// Remove from indexes before deleting metadata
+			const metadata = this.metadata.get(cacheKey);
+			if (metadata) {
+				const contentHash = this.contentHashCache?.get(cacheKey);
+				this.removeFromIndexes(cacheKey, metadata, contentHash);
+			}
+			
 			this.metadata.delete(cacheKey);
+			// Clean up content hash cache
+			this.contentHashCache?.delete(cacheKey);
 		} catch(error) {
 			console.error("Failed to remove cache entry", error);
 		}
@@ -383,6 +407,14 @@ export class CacheService {
 			}
 
 			this.metadata.clear();
+			this.contentHashCache?.clear(); // Clear content hash cache
+			
+			// Clear all indexes
+			this.contentHashIndex?.clear();
+			this.sizeIndex?.clear();
+			this.dateIndex?.clear();
+			this.accessCountIndex?.clear();
+			
 			await this.saveMetadata(true); // Force immediate save for cleanup operations
 
 			console.log("Cleared Cache", filesToClear.length);
@@ -582,6 +614,9 @@ export class CacheService {
 			const buffer = Buffer.isBuffer(data) ? data : Buffer.from(data);
 			const filePath = path.join(this.cacheDir, `${cacheKey}.${this.fileExtention}`);
 			
+			// Calculate content hash for indexing
+			const contentHash = crypto.createHash("sha256").update(buffer).digest("hex");
+			
 			// Write the data to disk
 			await fs.writeFile(filePath, buffer);
 			
@@ -595,7 +630,19 @@ export class CacheService {
 				accessCount: 0
 			};
 			
+			// Remove old entry from indexes if it exists
+			const oldMetadata = this.metadata.get(cacheKey);
+			if (oldMetadata) {
+				const oldContentHash = this.contentHashCache?.get(cacheKey);
+				this.removeFromIndexes(cacheKey, oldMetadata, oldContentHash);
+			}
+			
 			this.metadata.set(cacheKey, metadata);
+			this.contentHashCache?.set(cacheKey, contentHash);
+			
+			// Add to all indexes
+			this.addToIndexes(cacheKey, metadata, contentHash);
+			
 			this.scheduleMetadataSave(); // Use batched save instead of immediate
 			
 			// Enforce cache size limits after adding new entry
@@ -608,13 +655,130 @@ export class CacheService {
 		}
 	}
 
+	/**
+	 * Adds an entry to all relevant indexes
+	 */
+	private addToIndexes(cacheKey: string, metadata: cacheTypes.CacheMetaData, contentHash?: string): void {
+		// Add to size index
+		if (!this.sizeIndex!.has(metadata.dataSize)) {
+			this.sizeIndex!.set(metadata.dataSize, new Set());
+		}
+		this.sizeIndex!.get(metadata.dataSize)!.add(cacheKey);
+
+		// Add to date index (by creation date)
+		const dateKey = new Date(metadata.createdAt).toISOString().split("T")[0];
+		if (!this.dateIndex!.has(dateKey)) {
+			this.dateIndex!.set(dateKey, new Set());
+		}
+		this.dateIndex!.get(dateKey)!.add(cacheKey);
+
+		// Add to access count index
+		const accessCount = metadata.accessCount || 0;
+		if (!this.accessCountIndex!.has(accessCount)) {
+			this.accessCountIndex!.set(accessCount, new Set());
+		}
+		this.accessCountIndex!.get(accessCount)!.add(cacheKey);
+
+		// Add to content hash index if provided
+		if (contentHash) {
+			if (!this.contentHashIndex!.has(contentHash)) {
+				this.contentHashIndex!.set(contentHash, new Set());
+			}
+			this.contentHashIndex!.get(contentHash)!.add(cacheKey);
+		}
+	}
+
+	/**
+	 * Removes an entry from all relevant indexes
+	 */
+	private removeFromIndexes(cacheKey: string, metadata: cacheTypes.CacheMetaData, contentHash?: string): void {
+		// Remove from size index
+		const sizeSet = this.sizeIndex!.get(metadata.dataSize);
+		if (sizeSet) {
+			sizeSet.delete(cacheKey);
+			if (sizeSet.size === 0) {
+				this.sizeIndex!.delete(metadata.dataSize);
+			}
+		}
+
+		// Remove from date index
+		const dateKey = new Date(metadata.createdAt).toISOString().split("T")[0];
+		const dateSet = this.dateIndex!.get(dateKey);
+		if (dateSet) {
+			dateSet.delete(cacheKey);
+			if (dateSet.size === 0) {
+				this.dateIndex!.delete(dateKey);
+			}
+		}
+
+		// Remove from access count index
+		const accessCount = metadata.accessCount || 0;
+		const accessSet = this.accessCountIndex!.get(accessCount);
+		if (accessSet) {
+			accessSet.delete(cacheKey);
+			if (accessSet.size === 0) {
+				this.accessCountIndex!.delete(accessCount);
+			}
+		}
+
+		// Remove from content hash index if provided
+		if (contentHash) {
+			const hashSet = this.contentHashIndex!.get(contentHash);
+			if (hashSet) {
+				hashSet.delete(cacheKey);
+				if (hashSet.size === 0) {
+					this.contentHashIndex!.delete(contentHash);
+				}
+			}
+		}
+	}
+
+	/**
+	 * Gets the content hash for a file, using cache if available
+	 */
+	private async getContentHash(cacheKey: string, metadata: cacheTypes.CacheMetaData): Promise<string | null> {
+		try {
+			// Check if we have a cached hash
+			const cachedHash = this.contentHashCache?.get(cacheKey);
+			if (cachedHash) {
+				return cachedHash;
+			}
+
+			const filePath = path.join(this.cacheDir, `${cacheKey}.${this.fileExtention}`);
+			const fileData = await fs.readFile(filePath);
+			
+			// Validate file size matches metadata
+			if (fileData.length !== metadata.dataSize) {
+				console.warn(`File size mismatch for ${cacheKey}: metadata=${metadata.dataSize}, actual=${fileData.length}`);
+				return null;
+			}
+			
+			// Calculate hash and cache it
+			const hash = crypto.createHash("sha256").update(fileData).digest("hex");
+			this.contentHashCache?.set(cacheKey, hash);
+			
+			return hash;
+		} catch (error) {
+			// File doesn't exist or can't be read
+			return null;
+		}
+	}
+
 	async findKeyByValue(searchValue: Buffer | string): Promise<string | null> {
 		try {
 			// Convert search value to buffer for comparison
 			const searchBuffer = Buffer.isBuffer(searchValue) ? searchValue : Buffer.from(searchValue);
-			const cutoffDate = this.getCutoffDate();
+			const searchHash = crypto.createHash("sha256").update(searchBuffer).digest("hex");
 			
-			// Filter candidates by size first to reduce file I/O
+			// First check if we have this content hash in our index
+			const indexedKeys = this.contentHashIndex?.get(searchHash);
+			if (indexedKeys && indexedKeys.size > 0) {
+				// Return the first key from the index (fastest possible lookup)
+				return indexedKeys.values().next().value || null;
+			}
+			
+			// Fallback to size-based filtering for non-indexed content
+			const cutoffDate = this.getCutoffDate();
 			const candidates = Array.from(this.metadata.entries())
 				.filter(([cacheKey, metadata]) => {
 					// Skip expired entries
@@ -628,26 +792,32 @@ export class CacheService {
 			// Early exit if no candidates
 			if (candidates.length === 0) return null;
 			
-			// Find first match efficiently with additional validation
-			for (const [cacheKey, metadata] of candidates) {
-				const filePath = path.join(this.cacheDir, `${cacheKey}.${this.fileExtention}`);
-				try {
-					const fileData = await fs.readFile(filePath);
-					
-					// Validate file size matches metadata
-					if (fileData.length !== metadata.dataSize) {
-						console.warn(`File size mismatch for ${cacheKey}: metadata=${metadata.dataSize}, actual=${fileData.length}`);
-						continue;
+			// Process candidates in parallel batches for better performance
+			const batchSize = Math.min(15, candidates.length); // Process up to 15 files in parallel
+			
+			for (let i = 0; i < candidates.length; i += batchSize) {
+				const batch = candidates.slice(i, i + batchSize);
+				
+				// Get content hashes in parallel
+				const hashPromises = batch.map(async ([cacheKey, metadata]) => {
+					const contentHash = await this.getContentHash(cacheKey, metadata);
+					if (contentHash === searchHash) {
+						// Add to content hash index for future fast lookups
+						if (!this.contentHashIndex!.has(contentHash)) {
+							this.contentHashIndex!.set(contentHash, new Set());
+						}
+						this.contentHashIndex!.get(contentHash)!.add(cacheKey);
+						return cacheKey;
 					}
-					
-					if (Buffer.compare(fileData, searchBuffer) === 0) {
-						return cacheKey; // Return the first matching cache key
-					}
-				} catch (error) {
-					// File doesn't exist or can't be read, clean up metadata
-					console.warn(`File access error for ${cacheKey}, removing orphaned metadata`);
-					this.metadata.delete(cacheKey);
-					continue;
+					return null;
+				});
+				
+				// Wait for batch to complete and check for matches
+				const results = await Promise.all(hashPromises);
+				const match = results.find(result => result !== null);
+				
+				if (match) {
+					return match; // Return first match found
 				}
 			}
 			
@@ -663,9 +833,17 @@ export class CacheService {
 		try {
 			// Convert search value to buffer for comparison
 			const searchBuffer = Buffer.isBuffer(searchValue) ? searchValue : Buffer.from(searchValue);
-			const cutoffDate = this.getCutoffDate();
+			const searchHash = crypto.createHash("sha256").update(searchBuffer).digest("hex");
 			
-			// Filter candidates by size first to reduce file I/O
+			// First check if we have this content hash in our index
+			const indexedKeys = this.contentHashIndex?.get(searchHash);
+			if (indexedKeys && indexedKeys.size > 0) {
+				// Return all keys from the index (fastest possible lookup)
+				return Array.from(indexedKeys);
+			}
+			
+			// Fallback to size-based filtering for non-indexed content
+			const cutoffDate = this.getCutoffDate();
 			const candidates = Array.from(this.metadata.entries())
 				.filter(([cacheKey, metadata]) => {
 					// Skip expired entries
@@ -674,20 +852,35 @@ export class CacheService {
 					return metadata.dataSize === searchBuffer.length;
 				});
 			
+			// Early exit if no candidates
+			if (candidates.length === 0) return [];
+			
 			const matchingKeys: string[] = [];
 			
-			// Process all candidates
-			for (const [cacheKey] of candidates) {
-				const filePath = path.join(this.cacheDir, `${cacheKey}.${this.fileExtention}`);
-				try {
-					const fileData = await fs.readFile(filePath);
-					if (Buffer.compare(fileData, searchBuffer) === 0) {
-						matchingKeys.push(cacheKey);
+			// Process candidates in parallel batches for better performance
+			const batchSize = Math.min(20, candidates.length); // Process up to 20 files in parallel
+			
+			for (let i = 0; i < candidates.length; i += batchSize) {
+				const batch = candidates.slice(i, i + batchSize);
+				
+				// Get content hashes in parallel
+				const hashPromises = batch.map(async ([cacheKey, metadata]) => {
+					const contentHash = await this.getContentHash(cacheKey, metadata);
+					if (contentHash === searchHash) {
+						// Add to content hash index for future fast lookups
+						if (!this.contentHashIndex!.has(contentHash)) {
+							this.contentHashIndex!.set(contentHash, new Set());
+						}
+						this.contentHashIndex!.get(contentHash)!.add(cacheKey);
+						return cacheKey;
 					}
-				} catch (error) {
-					// File doesn't exist or can't be read, skip
-					continue;
-				}
+					return null;
+				});
+				
+				// Wait for batch to complete and collect matches
+				const results = await Promise.all(hashPromises);
+				const batchMatches = results.filter(result => result !== null) as string[];
+				matchingKeys.push(...batchMatches);
 			}
 			
 			return matchingKeys;
@@ -696,6 +889,73 @@ export class CacheService {
 			console.error("Error finding all keys by value", error);
 			return [];
 		}
+	}
+
+	/**
+	 * Find all cache keys by data size (uses size index for fast lookup)
+	 */
+	async findKeysBySize(dataSize: number): Promise<string[]> {
+		try {
+			const sizeSet = this.sizeIndex?.get(dataSize);
+			if (sizeSet) {
+				return Array.from(sizeSet);
+			}
+			return [];
+		} catch (error) {
+			console.error("Error finding keys by size", error);
+			return [];
+		}
+	}
+
+	/**
+	 * Find all cache keys created on a specific date (uses date index for fast lookup)
+	 */
+	async findKeysByDate(date: string): Promise<string[]> {
+		try {
+			const dateSet = this.dateIndex?.get(date);
+			if (dateSet) {
+				return Array.from(dateSet);
+			}
+			return [];
+		} catch (error) {
+			console.error("Error finding keys by date", error);
+			return [];
+		}
+	}
+
+	/**
+	 * Find all cache keys with a specific access count (uses access count index for fast lookup)
+	 */
+	async findKeysByAccessCount(accessCount: number): Promise<string[]> {
+		try {
+			const accessSet = this.accessCountIndex?.get(accessCount);
+			if (accessSet) {
+				return Array.from(accessSet);
+			}
+			return [];
+		} catch (error) {
+			console.error("Error finding keys by access count", error);
+			return [];
+		}
+	}
+
+	/**
+	 * Get index statistics for monitoring and debugging
+	 */
+	getIndexStats(): {
+		contentHashIndexSize: number;
+		sizeIndexSize: number;
+		dateIndexSize: number;
+		accessCountIndexSize: number;
+		totalIndexedKeys: number;
+		} {
+		return {
+			contentHashIndexSize: this.contentHashIndex?.size || 0,
+			sizeIndexSize: this.sizeIndex?.size || 0,
+			dateIndexSize: this.dateIndex?.size || 0,
+			accessCountIndexSize: this.accessCountIndex?.size || 0,
+			totalIndexedKeys: Array.from(this.metadata.keys()).length
+		};
 	}
 
 }

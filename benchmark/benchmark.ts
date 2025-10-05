@@ -5,6 +5,7 @@ interface BenchmarkMetrics {
 	totalSetTime: number;
 	totalGetTime: number;
 	totalExistsTime: number;
+	totalDeleteTime: number;
 	totalFindKeyTime: number;
 	totalFindAllKeysTime: number;
 	totalStatsTime: number;
@@ -13,11 +14,14 @@ interface BenchmarkMetrics {
 	misses: number;
 	existsHits: number;
 	existsMisses: number;
+	deleteHits: number;
+	deleteMisses: number;
 	findKeyHits: number;
 	findKeyMisses: number;
 	setOperations: number;
 	getOperations: number;
 	existsOperations: number;
+	deleteOperations: number;
 	findKeyOperations: number;
 	findAllKeysOperations: number;
 	statsOperations: number;
@@ -60,6 +64,7 @@ async function benchmarkCacheService() {
 		totalSetTime: 0,
 		totalGetTime: 0,
 		totalExistsTime: 0,
+		totalDeleteTime: 0,
 		totalFindKeyTime: 0,
 		totalFindAllKeysTime: 0,
 		totalStatsTime: 0,
@@ -68,11 +73,14 @@ async function benchmarkCacheService() {
 		misses: 0,
 		existsHits: 0,
 		existsMisses: 0,
+		deleteHits: 0,
+		deleteMisses: 0,
 		findKeyHits: 0,
 		findKeyMisses: 0,
 		setOperations: 0,
 		getOperations: 0,
 		existsOperations: 0,
+		deleteOperations: 0,
 		findKeyOperations: 0,
 		findAllKeysOperations: 0,
 		statsOperations: 0,
@@ -146,7 +154,29 @@ async function benchmarkCacheService() {
 			metrics.existsOperations++;
 		}
 
-		// 4. findKeyByValue operation (every 10 iterations)
+		// 4. DELETE operation (every 9 iterations)
+		if (i % 9 === 0 && liveKeys.size > 0) {
+			// Delete a random key from the live set
+			const keysToDelete = Array.from(liveKeys);
+			const randomKeyToDelete = keysToDelete[Math.floor(Math.random() * keysToDelete.length)];
+			const dataSize = dataSizes[randomKeyToDelete % dataSizes.length];
+			const deleteKey = { ...testKeyPrefix, i: randomKeyToDelete, dataSize: dataSize.name };
+
+			const deleteTime = await measureTimeAsync(async () => {
+				const deleted = await cache.deleteKey(deleteKey);
+				if (deleted) {
+					metrics.deleteHits++;
+					liveKeys.delete(randomKeyToDelete);
+					storedData.delete(randomKeyToDelete);
+				} else {
+					metrics.deleteMisses++;
+				}
+			});
+			metrics.totalDeleteTime += deleteTime;
+			metrics.deleteOperations++;
+		}
+
+		// 5. findKeyByValue operation (every 10 iterations)
 		if (i % 10 === 0 && storedData.size > 0) {
 			const randomStoredIndex = Array.from(storedData.keys())[Math.floor(Math.random() * storedData.size)];
 			const searchData = storedData.get(randomStoredIndex)!;
@@ -214,6 +244,7 @@ async function benchmarkCacheService() {
 	console.log(`Average SET time: ${(metrics.totalSetTime / metrics.setOperations).toFixed(2)} ms (${metrics.setOperations} operations)`);
 	console.log(`Average GET time: ${(metrics.totalGetTime / metrics.getOperations).toFixed(2)} ms (${metrics.getOperations} operations)`);
 	console.log(`Average EXISTS time: ${(metrics.totalExistsTime / metrics.existsOperations).toFixed(2)} ms (${metrics.existsOperations} operations)`);
+	console.log(`Average DELETE time: ${(metrics.totalDeleteTime / metrics.deleteOperations).toFixed(2)} ms (${metrics.deleteOperations} operations)`);
 	console.log(`Average findKeyByValue time: ${(metrics.totalFindKeyTime / metrics.findKeyOperations).toFixed(2)} ms (${metrics.findKeyOperations} operations)`);
 	console.log(`Average findAllKeysByValue time: ${(metrics.totalFindAllKeysTime / metrics.findAllKeysOperations).toFixed(2)} ms (${metrics.findAllKeysOperations} operations)`);
 	console.log(`Average getStats time: ${(metrics.totalStatsTime / metrics.statsOperations).toFixed(2)} ms (${metrics.statsOperations} operations)`);
@@ -223,10 +254,12 @@ async function benchmarkCacheService() {
 	console.log("\nHIT RATE METRICS:");
 	const totalGets = metrics.hits + metrics.misses;
 	const totalExists = metrics.existsHits + metrics.existsMisses;
+	const totalDeletes = metrics.deleteHits + metrics.deleteMisses;
 	const totalFindKey = metrics.findKeyHits + metrics.findKeyMisses;
 	
 	console.log(`GET hit rate: ${metrics.hits}/${totalGets} (${totalGets > 0 ? (metrics.hits / totalGets * 100).toFixed(2) : 0}%)`);
 	console.log(`EXISTS hit rate: ${metrics.existsHits}/${totalExists} (${totalExists > 0 ? (metrics.existsHits / totalExists * 100).toFixed(2) : 0}%)`);
+	console.log(`DELETE success rate: ${metrics.deleteHits}/${totalDeletes} (${totalDeletes > 0 ? (metrics.deleteHits / totalDeletes * 100).toFixed(2) : 0}%)`);
 	console.log(`findKeyByValue hit rate: ${metrics.findKeyHits}/${totalFindKey} (${totalFindKey > 0 ? (metrics.findKeyHits / totalFindKey * 100).toFixed(2) : 0}%)`);
 
 	// Final cache statistics

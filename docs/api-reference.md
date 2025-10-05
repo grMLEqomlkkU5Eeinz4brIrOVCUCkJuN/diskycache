@@ -161,6 +161,29 @@ if (!exists) {
 }
 ```
 
+### `deleteKey(keyData): Promise<boolean>`
+
+Deletes a cache entry by its key data.
+
+**Parameters:**
+- `keyData`: `string | Record<string, any>` - Cache key data
+
+**Returns:** `Promise<boolean>` - Success status
+
+**Features:**
+- SHA-256 key lookup
+- File and metadata cleanup
+- Index updates
+- Orphaned file cleanup
+
+**Example:**
+```ts
+const deleted = await cache.deleteKey("user:123");
+if (deleted) {
+    console.log("Cache entry deleted successfully");
+}
+```
+
 ## Search Operations
 
 ### `findKeyByValue(searchValue): Promise<string | null>`

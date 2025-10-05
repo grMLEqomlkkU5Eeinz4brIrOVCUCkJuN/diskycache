@@ -175,6 +175,44 @@ sequenceDiagram
     end
 ```
 
+### Delete Operation Flow
+
+```mermaid
+sequenceDiagram
+    participant Client
+    participant CacheService
+    participant HashManager
+    participant MetadataManager
+    participant FileManager
+    participant IndexManager
+    participant BatchScheduler
+
+    Client->>CacheService: deleteKey(keyData)
+    CacheService->>HashManager: generateCacheKey(keyData)
+    HashManager->>CacheService: sha256Hash
+    
+    CacheService->>MetadataManager: getMetadata(hash)
+    MetadataManager->>CacheService: metadata/null
+    
+    alt metadata exists
+        CacheService->>FileManager: unlinkFile(hash.extension)
+        CacheService->>MetadataManager: removeMetadata(hash)
+        CacheService->>IndexManager: removeFromIndexes(hash, metadata)
+        IndexManager->>CacheService: indexesUpdated
+        CacheService->>Client: true (success)
+    else metadata missing
+        CacheService->>FileManager: accessFile(hash.extension)
+        FileManager->>CacheService: fileExists/notFound
+        
+        alt file exists (orphaned)
+            CacheService->>FileManager: unlinkFile(hash.extension)
+            CacheService->>Client: true (orphaned file cleaned)
+        else file missing
+            CacheService->>Client: false (nothing to delete)
+        end
+    end
+```
+
 ## Search Operations
 
 ### Content-Based Search Flow (Index-Based)

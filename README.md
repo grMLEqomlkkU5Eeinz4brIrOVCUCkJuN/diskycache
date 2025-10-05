@@ -230,6 +230,16 @@ Checks if a key exists and is valid in cache.
 const exists = await cache.exists("user_profile");
 ```
 
+#### `deleteKey(keyData): Promise<boolean>`
+Deletes a cache entry by its key data.
+
+```js
+const deleted = await cache.deleteKey("user_profile");
+if (deleted) {
+	console.log("Cache entry deleted successfully");
+}
+```
+
 ### Search Methods
 
 #### `findKeyByValue(searchValue): Promise<string | null>`

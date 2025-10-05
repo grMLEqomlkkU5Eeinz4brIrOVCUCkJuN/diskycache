@@ -166,6 +166,70 @@ describe("CacheService", () => {
 			exists = await cache.exists(cacheKey);
 			expect(exists).toBe(true);
 		});
+
+		it("should delete cache entries", async () => {
+			const testData = "data-to-delete";
+			const cacheKey = "delete-test";
+
+			// Set the key
+			await cache.set(cacheKey, testData);
+			let exists = await cache.exists(cacheKey);
+			expect(exists).toBe(true);
+
+			// Delete the key
+			const deleteResult = await cache.deleteKey(cacheKey);
+			expect(deleteResult).toBe(true);
+
+			// Verify it's deleted
+			exists = await cache.exists(cacheKey);
+			expect(exists).toBe(false);
+
+			const retrieved = await cache.get(cacheKey);
+			expect(retrieved).toBeNull();
+		});
+
+		it("should handle deleting non-existent keys", async () => {
+			const deleteResult = await cache.deleteKey("non-existent-key");
+			expect(deleteResult).toBe(false);
+		});
+
+		it("should delete entries with object keys", async () => {
+			const testData = "object-key-data";
+			const cacheKey = { type: "delete", id: "test" };
+
+			// Set the key
+			await cache.set(cacheKey, testData);
+			let exists = await cache.exists(cacheKey);
+			expect(exists).toBe(true);
+
+			// Delete the key
+			const deleteResult = await cache.deleteKey(cacheKey);
+			expect(deleteResult).toBe(true);
+
+			// Verify it's deleted
+			exists = await cache.exists(cacheKey);
+			expect(exists).toBe(false);
+		});
+
+		it("should clean up orphaned files when deleting", async () => {
+			const testData = "orphan-test-data";
+			const cacheKey = "orphan-test";
+
+			// Set the key
+			await cache.set(cacheKey, testData);
+			
+			// Manually remove from metadata to simulate orphaned file
+			const hashKey = cache.generateCacheKey(cacheKey);
+			cache.metadata.delete(hashKey);
+
+			// Delete should still work and clean up the orphaned file
+			const deleteResult = await cache.deleteKey(cacheKey);
+			expect(deleteResult).toBe(true);
+
+			// Verify it's deleted
+			const exists = await cache.exists(cacheKey);
+			expect(exists).toBe(false);
+		});
 	});
 
 	describe("Access Tracking", () => {

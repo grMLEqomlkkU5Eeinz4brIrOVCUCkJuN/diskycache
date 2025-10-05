@@ -31,6 +31,16 @@ if (userData) {
 	const user = JSON.parse(userData.toString());
 	console.log(`User: ${user.name}`);
 }
+
+// Check if key exists
+const exists = await cache.exists("user:123");
+console.log("User exists:", exists);
+
+// Delete a cache entry
+const deleted = await cache.deleteKey("user:123");
+if (deleted) {
+	console.log("User data deleted from cache");
+}
 ```
 
 ### Flexible Configuration Examples

@@ -822,6 +822,35 @@ export class CacheService {
 		}
 	}
 
+	async deleteKey(keyData: string | Record<string, any>): Promise<boolean> {
+		try {
+			this.validateCacheKeySize(keyData);
+			const cacheKey = this.generateCacheKey(keyData);
+			
+			const metadata = this.metadata.get(cacheKey);
+			if (!metadata) {
+				// Key doesn't exist in metadata, but check if file exists
+				const filePath = path.join(this.cacheDir, `${cacheKey}.${this.fileExtention}`);
+				try {
+					await fs.access(filePath);
+					// File exists but no metadata, clean it up
+					await fs.unlink(filePath);
+					return true;
+				} catch {
+					// Neither metadata nor file exists
+					return false;
+				}
+			}
+
+			// Remove the entry (file, metadata, and indexes)
+			await this.removeEntry(cacheKey);
+			return true;
+		} catch (error) {
+			console.error("Error deleting cache key", error);
+			return false;
+		}
+	}
+
 	async set(keyData: string | Record<string, any>, data: Buffer | string): Promise<boolean> {
 		try {
 			this.validateCacheKeySize(keyData);

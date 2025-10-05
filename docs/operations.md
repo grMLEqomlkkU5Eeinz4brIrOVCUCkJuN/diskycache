@@ -1,14 +1,14 @@
 # DiskyCache Operations
 
-This document provides detailed sequence diagrams and operation flows for DiskyCache functionality.
+This document provides detailed sequence diagrams and operation flows for DiskyCache functionality with comprehensive indexing and flexible configuration.
 
 ## Core Operations Overview
 
-The cache system operates through several key workflows that handle data storage, retrieval, cleanup, and health monitoring.
+The cache system operates through several key workflows that handle data storage, retrieval, cleanup, health monitoring, and multi-dimensional searching with sub-millisecond performance.
 
 ## Primary Operations
 
-### Set Operation Flow
+### Set Operation Flow (with Index Updates)
 
 ```mermaid
 sequenceDiagram
@@ -17,6 +17,7 @@ sequenceDiagram
     participant HashManager
     participant MetadataManager
     participant FileManager
+    participant IndexSystem
     participant BatchScheduler
 
     Client->>CacheService: set(keyData, data)
@@ -25,8 +26,20 @@ sequenceDiagram
     CacheService->>HashManager: generateCacheKey(normalized)
     HashManager->>CacheService: sha256Hash
     
+    CacheService->>HashManager: generateContentHash(data)
+    HashManager->>CacheService: contentHash
+    
+    CacheService->>IndexSystem: removeFromIndexes(oldEntry)
+    IndexSystem->>CacheService: removed
+    
     CacheService->>FileManager: writeFile(hash.extention, data)
     FileManager->>CacheService: success/failure
+    
+    CacheService->>IndexSystem: addToIndexes(hash, metadata, contentHash)
+    IndexSystem->>IndexSystem: updateContentHashIndex
+    IndexSystem->>IndexSystem: updateSizeIndex
+    IndexSystem->>IndexSystem: updateDateIndex
+    IndexSystem->>IndexSystem: updateAccessCountIndex
     
     CacheService->>MetadataManager: updateMetadata(hash, metadata)
     MetadataManager->>BatchScheduler: scheduleMetadataSave()
@@ -70,7 +83,126 @@ sequenceDiagram
     end
 ```
 
-### Health Check Operation Flow
+## Search Operations
+
+### Content-Based Search Flow (Index-Based)
+
+```mermaid
+sequenceDiagram
+    participant Client
+    participant CacheService
+    participant HashManager
+    participant IndexSystem
+    participant FileManager
+
+    Client->>CacheService: findKeyByValue(searchValue)
+    CacheService->>HashManager: generateContentHash(searchValue)
+    HashManager->>CacheService: contentHash
+    
+    CacheService->>IndexSystem: checkContentHashIndex(contentHash)
+    IndexSystem->>CacheService: Set of matching keys
+    
+    alt Keys found in index
+        IndexSystem->>CacheService: return first key
+        CacheService->>Client: string | null (0.1-0.5ms)
+    else Keys not found in index
+        CacheService->>FileManager: parallelFileSearch(searchValue)
+        FileManager->>FileManager: readFilesInBatches(15-20)
+        FileManager->>HashManager: generateContentHash(fileData)
+        HashManager->>FileManager: fileContentHash
+        FileManager->>IndexSystem: addToContentHashIndex(fileHash, key)
+        FileManager->>CacheService: matching keys
+        CacheService->>Client: string | null (5-8ms)
+    end
+```
+
+### Multi-Dimensional Search Flows
+
+#### Size-Based Search
+
+```mermaid
+sequenceDiagram
+    participant Client
+    participant CacheService
+    participant IndexSystem
+
+    Client->>CacheService: findKeysBySize(dataSize)
+    CacheService->>IndexSystem: checkSizeIndex(dataSize)
+    IndexSystem->>CacheService: Set of keys with that size
+    CacheService->>Client: string[] (0.1ms)
+```
+
+#### Date-Based Search
+
+```mermaid
+sequenceDiagram
+    participant Client
+    participant CacheService
+    participant IndexSystem
+
+    Client->>CacheService: findKeysByDate(date)
+    CacheService->>IndexSystem: checkDateIndex(date)
+    IndexSystem->>CacheService: Set of keys created on that date
+    CacheService->>Client: string[] (0.1ms)
+```
+
+#### Access Count Search
+
+```mermaid
+sequenceDiagram
+    participant Client
+    participant CacheService
+    participant IndexSystem
+
+    Client->>CacheService: findKeysByAccessCount(count)
+    CacheService->>IndexSystem: checkAccessCountIndex(count)
+    IndexSystem->>CacheService: Set of keys with that access count
+    CacheService->>Client: string[] (0.1ms)
+```
+
+## Configuration Operations
+
+### Runtime Configuration Update Flow
+
+```mermaid
+sequenceDiagram
+    participant Client
+    participant CacheService
+    participant ConfigParser
+    participant IndexSystem
+
+    Client->>CacheService: updateCacheSize(newSize)
+    CacheService->>ConfigParser: parseSize(newSize)
+    ConfigParser->>CacheService: parsedSizeBytes
+    
+    alt Size > 500MB
+        CacheService->>CacheService: generateWarning()
+        CacheService->>Client: console.warn("Large cache warning")
+    end
+    
+    CacheService->>CacheService: updateMaxSizeBytes(parsedSizeBytes)
+    CacheService->>CacheService: enforceMaxCacheSize()
+    CacheService->>IndexSystem: updateSizeIndex()
+    CacheService->>Client: boolean success
+```
+
+### Configuration Display Flow
+
+```mermaid
+sequenceDiagram
+    participant Client
+    participant CacheService
+    participant ConfigParser
+
+    Client->>CacheService: getConfiguration()
+    CacheService->>ConfigParser: formatBytes(maxSizeBytes)
+    ConfigParser->>CacheService: "500.00 MB"
+    CacheService->>ConfigParser: formatTime(maxCacheAgeMs)
+    ConfigParser->>CacheService: "7.00 d"
+    CacheService->>ConfigParser: formatBytes(cacheKeyLimitBytes)
+    ConfigParser->>CacheService: "100.00 KB"
+    CacheService->>Client: ConfigurationInfo object
+```
 
 ```mermaid
 sequenceDiagram

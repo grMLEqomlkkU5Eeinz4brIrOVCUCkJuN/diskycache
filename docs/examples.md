@@ -1,6 +1,6 @@
 # Practical Examples & Usage Patterns
 
-This document provides practical examples, common patterns, and real-world usage scenarios for DiskyCache.
+This document provides practical examples, common patterns, and real-world usage scenarios for DiskyCache with flexible configuration and comprehensive indexing.
 
 ## Basic Usage Patterns
 
@@ -9,8 +9,8 @@ This document provides practical examples, common patterns, and real-world usage
 ```typescript
 import { CacheService } from 'diskycache';
 
-// Create cache instance
-const cache = new CacheService("simple-cache", 100, 7, 50, "json");
+// Create cache instance with flexible configuration
+const cache = new CacheService("simple-cache", "100MB", "7d", "50KB", "json");
 
 // Store simple string data
 await cache.set("user:123", JSON.stringify({
@@ -27,6 +27,23 @@ if (userData) {
 }
 ```
 
+### Flexible Configuration Examples
+
+```typescript
+// Different size units
+const smallCache = new CacheService("small", "10MB", "1d", "10KB", "json");
+const mediumCache = new CacheService("medium", "500MB", "7d", "100KB", "json");
+const largeCache = new CacheService("large", "1GB", "30d", "1MB", "bin"); // Triggers warning
+
+// Different time units
+const shortCache = new CacheService("short", "50MB", "1h", "25KB", "json");
+const longCache = new CacheService("long", "200MB", "1w", "50KB", "json");
+const preciseCache = new CacheService("precise", "100MB", "3600s", "25KB", "json");
+
+// Traditional numeric values (backward compatible)
+const legacyCache = new CacheService("legacy", 100, 7, 50, "json");
+```
+
 ### Object-Based Cache Keys
 
 ```typescript
@@ -41,8 +58,8 @@ const profile = await cache.get({ userId: 123, type: "profile" });
 ### Binary Data Caching
 
 ```typescript
-// Cache binary data (images, files, etc.)
-const imageCache = new CacheService("image-cache", 500, 30, 500, "bin");
+// Cache binary data (images, files, etc.) with flexible configuration
+const imageCache = new CacheService("image-cache", "500MB", "30d", "500KB", "bin");
 
 // Store image buffer
 await imageCache.set("image:logo", imageBuffer);
@@ -55,6 +72,78 @@ if (logoData) {
 }
 ```
 
+## Advanced Search and Index Usage
+
+### Content-Based Searches
+
+```typescript
+// Sub-millisecond content searches using index
+const cache = new CacheService("search-cache", "200MB", "7d", "100KB", "json");
+
+// Store multiple entries with same content
+await cache.set("user:1", JSON.stringify({ name: "John", role: "admin" }));
+await cache.set("user:2", JSON.stringify({ name: "Jane", role: "user" }));
+await cache.set("user:3", JSON.stringify({ name: "John", role: "admin" })); // Duplicate content
+
+// Find all keys containing specific content (O(1) with index)
+const johnKeys = await cache.findAllKeysByValue(JSON.stringify({ name: "John", role: "admin" }));
+console.log(`Found ${johnKeys.length} entries with John admin data`);
+
+// Find first key with specific content
+const firstJohnKey = await cache.findKeyByValue(JSON.stringify({ name: "John", role: "admin" }));
+console.log(`First John admin key: ${firstJohnKey}`);
+```
+
+### Multi-Dimensional Searches
+
+```typescript
+// Size-based searches
+const smallFiles = await cache.findKeysBySize("1KB");
+const mediumFiles = await cache.findKeysBySize("100KB");
+const largeFiles = await cache.findKeysBySize("1MB");
+
+console.log(`Small files: ${smallFiles.length}, Medium: ${mediumFiles.length}, Large: ${largeFiles.length}`);
+
+// Date-based searches
+const today = new Date().toISOString().split('T')[0];
+const todayFiles = await cache.findKeysByDate(today);
+const yesterdayFiles = await cache.findKeysByDate("2024-01-14");
+
+console.log(`Today's files: ${todayFiles.length}, Yesterday's: ${yesterdayFiles.length}`);
+
+// Access count analysis
+const hotFiles = await cache.findKeysByAccessCount(10); // Frequently accessed
+const warmFiles = await cache.findKeysByAccessCount(5);  // Moderately accessed
+const coldFiles = await cache.findKeysByAccessCount(1);  // Rarely accessed
+const unusedFiles = await cache.findKeysByAccessCount(0); // Never accessed
+
+console.log(`Hot: ${hotFiles.length}, Warm: ${warmFiles.length}, Cold: ${coldFiles.length}, Unused: ${unusedFiles.length}`);
+```
+
+### Index Statistics and Monitoring
+
+```typescript
+// Monitor index performance
+const indexStats = cache.getIndexStats();
+console.log({
+    contentHashIndex: indexStats.contentHashIndexSize,
+    sizeIndex: indexStats.sizeIndexSize,
+    dateIndex: indexStats.dateIndexSize,
+    accessCountIndex: indexStats.accessCountIndexSize,
+    totalIndexedKeys: indexStats.totalIndexedKeys
+});
+
+// Get current configuration
+const config = cache.getConfiguration();
+console.log({
+    cacheDir: config.cacheDir,
+    maxCacheSize: config.maxCacheSize,
+    maxCacheAge: config.maxCacheAge,
+    cacheKeyLimit: config.cacheKeyLimit,
+    fileExtension: config.fileExtension
+});
+```
+
 ## Intermediate Patterns
 
 ### API Response Caching
@@ -64,7 +153,7 @@ class ApiCache {
     private cache: CacheService;
     
     constructor(cacheDir: string) {
-        this.cache = new CacheService(cacheDir, 200, 1, 100, "json");
+        this.cache = new CacheService(cacheDir, "200MB", "1d", "100KB", "json");
     }
     
     async getCachedResponse(endpoint: string, params: Record<string, any>): Promise<any> {
@@ -106,7 +195,7 @@ class SessionStore {
     private sessionTimeout = 3600 * 24; // 24 hours
     
     constructor(sessionDir: string) {
-        this.cache = new CacheService(sessionDir, 50, 1, 50, "session");
+        this.cache = new CacheService(sessionDir, "50MB", "1d", "50KB", "session");
     }
     
     async getSession(sessionId: string): Promise<any> {
@@ -143,7 +232,7 @@ class DatabaseCache {
     private cache: CacheService;
     
     constructor(cacheDir: string) {
-        this.cache = new CacheService(cacheDir, 1000, 7, 200, "query");
+        this.cache = new CacheService(cacheDir, "1GB", "7d", "200KB", "query");
     }
     
     async cacheQuery<T>(
@@ -207,7 +296,7 @@ class MultiTenantCache {
     private masterCache: CacheService;
     
     constructor(baseDir: string) {
-        this.masterCache = new CacheService(baseDir, 100, 7, 50, "meta");
+        this.masterCache = new CacheService(baseDir, "100MB", "7d", "50KB", "meta");
     }
     
     async getTenantCache(tenantId: string): Promise<CacheService> {
@@ -218,7 +307,7 @@ class MultiTenantCache {
         if (!cached) {
             // Create new tenant-specific cache
             const tenantDir = `cache/${tenantId}`;
-            const cache = new CacheService(tenantDir, 200, 7, 100, "data");
+            const cache = new CacheService(tenantDir, "200MB", "7d", "100KB", "data");
             this.caches.set(tenantId, cache);
             
             // Track tenant cache info
@@ -419,6 +508,68 @@ class CacheHealthMonitor {
     }
 }
 
+## Configuration Warnings and Best Practices
+
+### Large Cache Size Warnings
+
+```typescript
+// This will trigger a warning
+const largeCache = new CacheService("large-cache", "1GB", "7d", "1MB", "bin");
+// Console output:
+// ⚠️  WARNING: Cache size 1.00 GB exceeds 500MB threshold. Diskycache was made for toy projects, not for production environments.
+//    Large cache sizes (1.00 GB) have not been thoroughly tested.
+//    Consider using a smaller cache size or a different caching solution
+//    for production environments requiring >500MB cache storage.
+//    Current configuration may experience performance issues or memory problems.
+
+// Runtime updates also trigger warnings
+await largeCache.updateCacheSize("2GB");
+// Same warning message will appear
+```
+
+### Recommended Cache Sizes
+
+```typescript
+// Small applications (< 100MB)
+const smallAppCache = new CacheService("small", "50MB", "1d", "25KB", "json");
+
+// Medium applications (100-500MB)
+const mediumAppCache = new CacheService("medium", "200MB", "7d", "100KB", "json");
+
+// Large applications (500MB+ - use with caution)
+const largeAppCache = new CacheService("large", "1GB", "30d", "1MB", "bin");
+// ⚠️ Warning: This configuration triggers warnings and is not recommended for production
+```
+
+### Configuration Validation
+
+```typescript
+function validateCacheConfig(maxSize: string, maxAge: string): boolean {
+    try {
+        // Test configuration parsing
+        const testCache = new CacheService("test", maxSize, maxAge, "100KB", "json");
+        
+        // Check if configuration triggers warnings
+        const config = testCache.getConfiguration();
+        const sizeBytes = parseFloat(config.maxCacheSize) * 1024 * 1024; // Convert MB to bytes
+        
+        if (sizeBytes > 500 * 1024 * 1024) {
+            console.warn("Configuration will trigger size warnings");
+            return false;
+        }
+        
+        return true;
+    } catch (error) {
+        console.error("Invalid configuration:", error);
+        return false;
+    }
+}
+
+// Usage
+const isValid = validateCacheConfig("300MB", "7d"); // Returns true
+const isInvalid = validateCacheConfig("1GB", "7d"); // Returns false, triggers warning
+```
+
 type HealthReport = {
     healthy: boolean;
     issues: string[];
@@ -443,7 +594,7 @@ class CacheApplication {
     private isShuttingDown = false;
     
     constructor() {
-        this.cache = new CacheService("app-cache", 500, 7, 100, "data");
+        this.cache = new CacheService("app-cache", "500MB", "7d", "100KB", "data");
         this.setupSignals();
         this.startPeriodicTasks();
     }

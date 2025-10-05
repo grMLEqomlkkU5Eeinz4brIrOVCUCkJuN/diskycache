@@ -3,6 +3,162 @@ import * as path from "path";
 import * as crypto from "crypto";
 import * as cacheTypes from "./types/cacheTypes"
 
+/**
+ * Configuration parser for flexible unit handling
+ */
+class ConfigParser {
+	/**
+	 * Parse size configuration with support for different units
+	 * Supports: B, KB, MB, GB, TB (case insensitive)
+	 * Examples: "500MB", "1.5GB", "1024KB", "2TB"
+	 */
+	static parseSize(value: string | number): number {
+		if (typeof value === "number") {
+			return value;
+		}
+
+		const sizeStr = value.toString().trim().toUpperCase();
+		const units = {
+			"B": 1,
+			"KB": 1024,
+			"MB": 1024 * 1024,
+			"GB": 1024 * 1024 * 1024,
+			"TB": 1024 * 1024 * 1024 * 1024
+		};
+
+		// Extract number and unit
+		const match = sizeStr.match(/^([\d.]+)\s*([A-Z]+)?$/);
+		if (!match) {
+			throw new Error(`Invalid size format: ${value}. Expected format: "500MB", "1.5GB", etc.`);
+		}
+
+		const [, numStr, unitStr] = match;
+		const num = parseFloat(numStr);
+		
+		if (isNaN(num)) {
+			throw new Error(`Invalid number in size: ${value}`);
+		}
+
+		// Default to MB if no unit specified
+		const unit = unitStr || "MB";
+		const multiplier = units[unit as keyof typeof units];
+		
+		if (!multiplier) {
+			throw new Error(`Unsupported size unit: ${unit}. Supported units: B, KB, MB, GB, TB`);
+		}
+
+		return num * multiplier;
+	}
+
+	/**
+	 * Parse time configuration with support for different units
+	 * Supports: ms, s, m, h, d, w (case insensitive)
+	 * Examples: "7d", "24h", "3600s", "1w"
+	 */
+	static parseTime(value: string | number): number {
+		if (typeof value === "number") {
+			return value;
+		}
+
+		const timeStr = value.toString().trim().toLowerCase();
+		const units = {
+			"ms": 1,
+			"s": 1000,
+			"m": 60 * 1000,
+			"h": 60 * 60 * 1000,
+			"d": 24 * 60 * 60 * 1000,
+			"w": 7 * 24 * 60 * 60 * 1000
+		};
+
+		// Extract number and unit
+		const match = timeStr.match(/^([\d.]+)\s*([a-z]+)?$/);
+		if (!match) {
+			throw new Error(`Invalid time format: ${value}. Expected format: "7d", "24h", "3600s", etc.`);
+		}
+
+		const [, numStr, unitStr] = match;
+		const num = parseFloat(numStr);
+		
+		if (isNaN(num)) {
+			throw new Error(`Invalid number in time: ${value}`);
+		}
+
+		// Default to days if no unit specified
+		const unit = unitStr || "d";
+		const multiplier = units[unit as keyof typeof units];
+		
+		if (!multiplier) {
+			throw new Error(`Unsupported time unit: ${unit}. Supported units: ms, s, m, h, d, w`);
+		}
+
+		return num * multiplier;
+	}
+
+	/**
+	 * Parse cache age and return days (for backward compatibility)
+	 */
+	static parseCacheAge(value: string | number): number {
+		const milliseconds = this.parseTime(value);
+		return milliseconds / (24 * 60 * 60 * 1000); // Convert to days
+	}
+
+	/**
+	 * Parse cache size and return MB (for backward compatibility)
+	 */
+	static parseCacheSize(value: string | number): number {
+		const bytes = this.parseSize(value);
+		return bytes / (1024 * 1024); // Convert to MB
+	}
+
+	/**
+	 * Parse cache key limit and return KB (for backward compatibility)
+	 */
+	static parseCacheKeyLimit(value: string | number): number {
+		const bytes = this.parseSize(value);
+		return bytes / 1024; // Convert to KB
+	}
+
+	/**
+	 * Format bytes to human readable string
+	 */
+	static formatBytes(bytes: number): string {
+		const units = ["B", "KB", "MB", "GB", "TB"];
+		let size = bytes;
+		let unitIndex = 0;
+
+		while (size >= 1024 && unitIndex < units.length - 1) {
+			size /= 1024;
+			unitIndex++;
+		}
+
+		return `${size.toFixed(2)} ${units[unitIndex]}`;
+	}
+
+	/**
+	 * Format milliseconds to human readable string
+	 */
+	static formatTime(milliseconds: number): string {
+		const units = [
+			{ name: "ms", value: 1 },
+			{ name: "s", value: 1000 },
+			{ name: "m", value: 60 * 1000 },
+			{ name: "h", value: 60 * 60 * 1000 },
+			{ name: "d", value: 24 * 60 * 60 * 1000 },
+			{ name: "w", value: 7 * 24 * 60 * 60 * 1000 }
+		];
+
+		for (let i = units.length - 1; i >= 0; i--) {
+			const unit = units[i];
+			if (milliseconds >= unit.value) {
+				const value = milliseconds / unit.value;
+				return `${value.toFixed(2)} ${unit.name}`;
+			}
+		}
+
+		return `${milliseconds} ms`;
+	}
+}
+
 export class CacheService {
 	private cacheDir: string;
 	private metadataFile: string;
@@ -22,17 +178,47 @@ export class CacheService {
 	private dateIndex?: Map<string, Set<string>>; // date (YYYY-MM-DD) -> set of cache keys
 	private accessCountIndex?: Map<number, Set<string>>; // access count -> set of cache keys
 	
-	constructor(dirName: string, maxCacheSizeMB: string | number, maxCacheAge: number, cacheKeyLimitKB: string | number, fileExtention: string) {
+	constructor(dirName: string, maxCacheSize: string | number, maxCacheAge: string | number, cacheKeyLimit: string | number, fileExtention: string) {
 		this.cacheDir = path.join(process.cwd(), dirName);
 		this.metadataFile = path.join(this.cacheDir, "metadata.json");
-		const parsedSize = Number(maxCacheSizeMB);
-		this.maxCacheSize = !isNaN(parsedSize) ? parsedSize : 500;
-		// Store cache age limit in days
-		this.maxCacheAge = maxCacheAge;
-		const parsedLimit = parseInt(cacheKeyLimitKB.toString());
-		const limitKB = !isNaN(parsedLimit) ? parsedLimit : 100;
-		this.cacheKeyLimitBytes = limitKB * 1024;
-		this.maxSizeBytes = this.maxCacheSize * 1024 * 1024;
+		
+		try {
+			// Parse cache size with flexible units
+			this.maxCacheSize = ConfigParser.parseCacheSize(maxCacheSize);
+			this.maxSizeBytes = ConfigParser.parseSize(maxCacheSize);
+			
+			// Warn users about untested large cache sizes
+			if (this.maxSizeBytes > 500 * 1024 * 1024) { // 500MB
+				const sizeStr = ConfigParser.formatBytes(this.maxSizeBytes);
+				console.warn("⚠️  WARNING: Cache size ${sizeStr} exceeds 500MB threshold. Diskycache was made for toy projects, not for production environments.");
+				console.warn("   Large cache sizes (${sizeStr}) have not been thoroughly tested.");
+				console.warn("   Consider using a smaller cache size or a different caching solution");
+				console.warn("   for production environments requiring >500MB cache storage.");
+				console.warn("   Current configuration may experience performance issues or memory problems.");
+			}
+		} catch (error) {
+			console.warn(`Invalid cache size format: ${maxCacheSize}, using default 500MB`);
+			this.maxCacheSize = 500;
+			this.maxSizeBytes = 500 * 1024 * 1024;
+		}
+		
+		try {
+			// Parse cache age with flexible units
+			this.maxCacheAge = ConfigParser.parseCacheAge(maxCacheAge);
+		} catch (error) {
+			console.warn(`Invalid cache age format: ${maxCacheAge}, using default 7 days`);
+			this.maxCacheAge = 7;
+		}
+		
+		try {
+			// Parse cache key limit with flexible units
+			const limitKB = ConfigParser.parseCacheKeyLimit(cacheKeyLimit);
+			this.cacheKeyLimitBytes = limitKB * 1024;
+		} catch (error) {
+			console.warn(`Invalid cache key limit format: ${cacheKeyLimit}, using default 100KB`);
+			this.cacheKeyLimitBytes = 100 * 1024;
+		}
+		
 		this.metadata = new Map(); // Store cache metadata for efficient lookups
 		this.fileExtention = fileExtention;
 		this.contentHashCache = new Map(); // Initialize content hash cache
@@ -956,6 +1142,88 @@ export class CacheService {
 			accessCountIndexSize: this.accessCountIndex?.size || 0,
 			totalIndexedKeys: Array.from(this.metadata.keys()).length
 		};
+	}
+
+	/**
+	 * Get current cache configuration in human-readable format
+	 */
+	getConfiguration(): {
+		cacheDir: string;
+		maxCacheSize: string;
+		maxCacheAge: string;
+		cacheKeyLimit: string;
+		fileExtension: string;
+		} {
+		return {
+			cacheDir: this.cacheDir,
+			maxCacheSize: ConfigParser.formatBytes(this.maxSizeBytes),
+			maxCacheAge: ConfigParser.formatTime(this.maxCacheAge * 24 * 60 * 60 * 1000),
+			cacheKeyLimit: ConfigParser.formatBytes(this.cacheKeyLimitBytes),
+			fileExtension: this.fileExtention
+		};
+	}
+
+	/**
+	 * Update cache size limit with flexible units
+	 * Examples: "1GB", "500MB", "2TB"
+	 */
+	async updateCacheSize(newSize: string | number): Promise<boolean> {
+		try {
+			const newSizeMB = ConfigParser.parseCacheSize(newSize);
+			const newSizeBytes = ConfigParser.parseSize(newSize);
+			
+			// Warn users about untested large cache sizes
+			if (newSizeBytes > 500 * 1024 * 1024) { // 500MB
+				const sizeStr = ConfigParser.formatBytes(newSizeBytes);
+				console.warn("⚠️  WARNING: Cache size ${sizeStr} exceeds 500MB threshold.");
+				console.warn("   Large cache sizes (${sizeStr}) have not been thoroughly tested.");
+				console.warn("   Consider using a smaller cache size or a different caching solution");
+				console.warn("   for production environments requiring >500MB cache storage.");
+				console.warn("   Current configuration may experience performance issues or memory problems.");
+			}
+			
+			this.maxCacheSize = newSizeMB;
+			this.maxSizeBytes = newSizeBytes;
+			
+			// Enforce new size limit
+			await this.enforceMaxCacheSize();
+			
+			return true;
+		} catch (error) {
+			console.error("Failed to update cache size:", error);
+			return false;
+		}
+	}
+
+	/**
+	 * Update cache age limit with flexible units
+	 * Examples: "7d", "24h", "1w", "3600s"
+	 */
+	updateCacheAge(newAge: string | number): boolean {
+		try {
+			this.maxCacheAge = ConfigParser.parseCacheAge(newAge);
+			// Clear cached cutoff date to force recalculation
+			this.cachedCutoffDate = undefined;
+			return true;
+		} catch (error) {
+			console.error("Failed to update cache age:", error);
+			return false;
+		}
+	}
+
+	/**
+	 * Update cache key limit with flexible units
+	 * Examples: "100KB", "1MB", "500B"
+	 */
+	updateCacheKeyLimit(newLimit: string | number): boolean {
+		try {
+			const limitKB = ConfigParser.parseCacheKeyLimit(newLimit);
+			this.cacheKeyLimitBytes = limitKB * 1024;
+			return true;
+		} catch (error) {
+			console.error("Failed to update cache key limit:", error);
+			return false;
+		}
 	}
 
 }

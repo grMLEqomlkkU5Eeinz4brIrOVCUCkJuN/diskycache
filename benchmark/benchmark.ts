@@ -25,7 +25,7 @@ interface BenchmarkMetrics {
 }
 
 async function benchmarkCacheService() {
-	const cache = new CacheService("cache_test_dir", 50, 7, 100, "bin"); // 50 MB max size for more data
+	const cache = new CacheService("cache_test_dir", "50MB", "7d", "100KB", "bin"); // Flexible units for more data
 	
 	// Test with different data sizes
 	const dataSizes = [
@@ -81,6 +81,15 @@ async function benchmarkCacheService() {
 
 	console.log(`Starting comprehensive benchmark with ${iterations} iterations...`);
 	console.log(`Testing with window size: ${windowSize} live keys`);
+	
+	// Display current configuration
+	const config = cache.getConfiguration();
+	console.log("Cache configuration:");
+	console.log(`  Directory: ${config.cacheDir}`);
+	console.log(`  Max size: ${config.maxCacheSize}`);
+	console.log(`  Max age: ${config.maxCacheAge}`);
+	console.log(`  Key limit: ${config.cacheKeyLimit}`);
+	console.log(`  File extension: ${config.fileExtension}`);
 
 	for (let i = 0; i < iterations; i++) {
 		// Cycle through different data sizes

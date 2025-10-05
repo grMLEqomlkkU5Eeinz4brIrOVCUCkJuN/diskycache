@@ -4,23 +4,30 @@ Complete API documentation for all DiskyCache methods, types, and configuration 
 
 ## Constructor
 
-### `new CacheService(dirName, maxCacheSizeMB?, maxCacheAgeDays?, maxKeySizeKB?, fileExtension?)`
+### `new CacheService(dirName, maxCacheSize?, maxCacheAge?, cacheKeyLimit?, fileExtension?)`
 
-Creates a new DiskyCache instance.
+Creates a new DiskyCache instance with flexible unit support.
 
 **Parameters:**
 
 | Parameter | Type | Default | Description |
 |-----------|------|---------|-------------|
 | `dirName` | `string` | Required | Cache directory path |
-| `maxCacheSizeMB` | `number` | `500` | Maximum cache size in MB |
-| `maxCacheAgeDays` | `number` | Required | Maximum age before expiration |
-| `maxKeySizeKB` | `number` | `100` | Maximum key size in KB |
+| `maxCacheSize` | `string \| number` | `"500MB"` | Maximum cache size (supports B, KB, MB, GB, TB) |
+| `maxCacheAge` | `string \| number` | Required | Maximum age before expiration (supports ms, s, m, h, d, w) |
+| `cacheKeyLimit` | `string \| number` | `"100KB"` | Maximum key size (supports B, KB, MB, GB, TB) |
 | `fileExtension` | `string` | `"cache"` | File extension for cached files |
 
-**Example:**
+**Warning:** Cache sizes above 500MB will trigger console warnings as these configurations have not been thoroughly tested.
+
+**Examples:**
 ```ts
-const cache = new CacheService("my-cache", 200, 7, 50, "json");
+// Traditional numeric values (backward compatible)
+const cache1 = new CacheService("my-cache", 200, 7, 50, "json");
+
+// Flexible string units
+const cache2 = new CacheService("my-cache", "200MB", "7d", "50KB", "json");
+const cache3 = new CacheService("my-cache", "1GB", "24h", "1MB", "json"); // Will trigger warning
 ```
 
 ## Core Operations
@@ -197,6 +204,85 @@ Returns statistics about the cache index system.
 const stats = cache.getIndexStats();
 console.log(`Content hash index: ${stats.contentHashIndexSize} entries`);
 console.log(`Size index: ${stats.sizeIndexSize} entries`);
+```
+
+### `getConfiguration(): ConfigurationInfo`
+
+Returns current cache configuration in human-readable format.
+
+**Returns:** `ConfigurationInfo` object with:
+- `cacheDir`: `string` - Cache directory path
+- `maxCacheSize`: `string` - Maximum cache size with unit
+- `maxCacheAge`: `string` - Maximum cache age with unit
+- `cacheKeyLimit`: `string` - Cache key limit with unit
+- `fileExtension`: `string` - File extension
+
+**Performance:** O(1) lookup time
+
+**Example:**
+```ts
+const config = cache.getConfiguration();
+console.log(`Cache size: ${config.maxCacheSize}`);
+console.log(`Cache age: ${config.maxCacheAge}`);
+```
+
+### `updateCacheSize(newSize: string | number): Promise<boolean>`
+
+Updates the cache size limit with flexible units.
+
+**Parameters:**
+- `newSize`: `string | number` - New cache size (e.g., "1GB", "500MB", "2TB")
+
+**Returns:** `Promise<boolean>` - Success status
+
+**Performance:** O(n) where n is number of entries (due to size enforcement)
+
+**Warning:** Cache sizes above 500MB will trigger console warnings as these configurations have not been thoroughly tested.
+
+**Example:**
+```ts
+const success = await cache.updateCacheSize("1GB");
+if (success) {
+    console.log("Cache size updated successfully");
+}
+```
+
+### `updateCacheAge(newAge: string | number): boolean`
+
+Updates the cache age limit with flexible units.
+
+**Parameters:**
+- `newAge`: `string | number` - New cache age (e.g., "7d", "24h", "1w")
+
+**Returns:** `boolean` - Success status
+
+**Performance:** O(1) lookup time
+
+**Example:**
+```ts
+const success = cache.updateCacheAge("24h");
+if (success) {
+    console.log("Cache age updated successfully");
+}
+```
+
+### `updateCacheKeyLimit(newLimit: string | number): boolean`
+
+Updates the cache key limit with flexible units.
+
+**Parameters:**
+- `newLimit`: `string | number` - New key limit (e.g., "100KB", "1MB", "500B")
+
+**Returns:** `boolean` - Success status
+
+**Performance:** O(1) lookup time
+
+**Example:**
+```ts
+const success = cache.updateCacheKeyLimit("1MB");
+if (success) {
+    console.log("Cache key limit updated successfully");
+}
 ```
 
 ## Management Operations
@@ -401,6 +487,17 @@ interface IndexStats {
     dateIndexSize: number;           // Date index entries
     accessCountIndexSize: number;    // Access count index entries
     totalIndexedKeys: number;        // Total indexed keys
+}
+```
+
+### `ConfigurationInfo`
+```ts
+interface ConfigurationInfo {
+    cacheDir: string;        // Cache directory path
+    maxCacheSize: string;    // Maximum cache size with unit
+    maxCacheAge: string;     // Maximum cache age with unit
+    cacheKeyLimit: string;   // Cache key limit with unit
+    fileExtension: string;  // File extension
 }
 ```
 

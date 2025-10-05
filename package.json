@@ -1,9 +1,40 @@
 {
 	"name": "diskycache",
-	"version": "1.0.2",
+	"version": "1.1.0",
+	"description": "A file system-based caching library for Node.js applications with comprehensive configuration options and sub-millisecond content searches.",
+	"keywords": [
+		"cache",
+		"caching",
+		"file-system",
+		"disk-cache",
+		"nodejs",
+		"typescript",
+		"performance",
+		"indexing",
+		"configuration",
+		"flexible"
+	],
+	"author": "DiskyCache Contributors",
+	"license": "MIT",
+	"repository": {
+		"type": "git",
+		"url": "https://github.com/your-org/diskycache.git"
+	},
+	"bugs": {
+		"url": "https://github.com/your-org/diskycache/issues"
+	},
+	"homepage": "https://github.com/your-org/diskycache#readme",
 	"module": "dist/index.js",
 	"main": "dist/index.js",
 	"types": "dist/index.d.ts",
+	"files": [
+		"dist/",
+		"README.md",
+		"LICENSE"
+	],
+	"engines": {
+		"node": ">=16.0.0"
+	},
 	"scripts": {
 		"build": "npx tsc",
 		"build:watch": "npx tsc --watch",

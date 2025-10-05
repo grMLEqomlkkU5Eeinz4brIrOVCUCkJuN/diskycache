@@ -1,7 +1,8 @@
 import * as fs from "fs/promises";
 import * as path from "path";
 import * as crypto from "crypto";
-import * as cacheTypes from "./types/cacheTypes"
+import * as cacheTypes from "./types/cacheTypes";
+import { CacheConfig, DEFAULT_CACHE_CONFIG, UNIT_CONSTANTS } from "./types/cacheConfig";
 
 /**
  * Configuration parser for flexible unit handling
@@ -14,17 +15,12 @@ class ConfigParser {
 	 */
 	static parseSize(value: string | number): number {
 		if (typeof value === "number") {
-			return value;
+			// Treat bare numbers as MB for backward compatibility
+			return value * UNIT_CONSTANTS.BYTES.MB;
 		}
 
 		const sizeStr = value.toString().trim().toUpperCase();
-		const units = {
-			"B": 1,
-			"KB": 1024,
-			"MB": 1024 * 1024,
-			"GB": 1024 * 1024 * 1024,
-			"TB": 1024 * 1024 * 1024 * 1024
-		};
+		const units = UNIT_CONSTANTS.BYTES;
 
 		// Extract number and unit
 		const match = sizeStr.match(/^([\d.]+)\s*([A-Z]+)?$/);
@@ -61,14 +57,7 @@ class ConfigParser {
 		}
 
 		const timeStr = value.toString().trim().toLowerCase();
-		const units = {
-			"ms": 1,
-			"s": 1000,
-			"m": 60 * 1000,
-			"h": 60 * 60 * 1000,
-			"d": 24 * 60 * 60 * 1000,
-			"w": 7 * 24 * 60 * 60 * 1000
-		};
+		const units = UNIT_CONSTANTS.TIME;
 
 		// Extract number and unit
 		const match = timeStr.match(/^([\d.]+)\s*([a-z]+)?$/);
@@ -98,8 +87,12 @@ class ConfigParser {
 	 * Parse cache age and return days (for backward compatibility)
 	 */
 	static parseCacheAge(value: string | number): number {
+		if (typeof value === "number") {
+			// Treat bare numbers as days for backward compatibility
+			return value;
+		}
 		const milliseconds = this.parseTime(value);
-		return milliseconds / (24 * 60 * 60 * 1000); // Convert to days
+		return milliseconds / UNIT_CONSTANTS.TIME.d; // Convert to days
 	}
 
 	/**
@@ -107,51 +100,48 @@ class ConfigParser {
 	 */
 	static parseCacheSize(value: string | number): number {
 		const bytes = this.parseSize(value);
-		return bytes / (1024 * 1024); // Convert to MB
+		return bytes / UNIT_CONSTANTS.BYTES.MB; // Convert to MB
 	}
 
 	/**
 	 * Parse cache key limit and return KB (for backward compatibility)
 	 */
 	static parseCacheKeyLimit(value: string | number): number {
+		if (typeof value === "number") {
+			// Treat bare numbers as KB for backward compatibility
+			return value;
+		}
 		const bytes = this.parseSize(value);
-		return bytes / 1024; // Convert to KB
+		return bytes / UNIT_CONSTANTS.BYTES.KB; // Convert to KB
 	}
 
 	/**
 	 * Format bytes to human readable string
 	 */
 	static formatBytes(bytes: number): string {
-		const units = ["B", "KB", "MB", "GB", "TB"];
+		const units = UNIT_CONSTANTS.FORMATTING.BYTE_UNITS;
 		let size = bytes;
 		let unitIndex = 0;
 
-		while (size >= 1024 && unitIndex < units.length - 1) {
-			size /= 1024;
+		while (size >= UNIT_CONSTANTS.BYTES.KB && unitIndex < units.length - 1) {
+			size /= UNIT_CONSTANTS.BYTES.KB;
 			unitIndex++;
 		}
 
-		return `${size.toFixed(2)} ${units[unitIndex]}`;
+		return `${size.toFixed(DEFAULT_CACHE_CONFIG.sizeFormatDecimalPlaces)} ${units[unitIndex]}`;
 	}
 
 	/**
 	 * Format milliseconds to human readable string
 	 */
 	static formatTime(milliseconds: number): string {
-		const units = [
-			{ name: "ms", value: 1 },
-			{ name: "s", value: 1000 },
-			{ name: "m", value: 60 * 1000 },
-			{ name: "h", value: 60 * 60 * 1000 },
-			{ name: "d", value: 24 * 60 * 60 * 1000 },
-			{ name: "w", value: 7 * 24 * 60 * 60 * 1000 }
-		];
+		const units = UNIT_CONSTANTS.FORMATTING.TIME_UNITS;
 
 		for (let i = units.length - 1; i >= 0; i--) {
 			const unit = units[i];
 			if (milliseconds >= unit.value) {
 				const value = milliseconds / unit.value;
-				return `${value.toFixed(2)} ${unit.name}`;
+				return `${value.toFixed(DEFAULT_CACHE_CONFIG.timeFormatDecimalPlaces)} ${unit.name}`;
 			}
 		}
 
@@ -178,49 +168,77 @@ export class CacheService {
 	private dateIndex?: Map<string, Set<string>>; // date (YYYY-MM-DD) -> set of cache keys
 	private accessCountIndex?: Map<number, Set<string>>; // access count -> set of cache keys
 	
-	constructor(dirName: string, maxCacheSize: string | number, maxCacheAge: string | number, cacheKeyLimit: string | number, fileExtention: string) {
-		this.cacheDir = path.join(process.cwd(), dirName);
+	// Configuration
+	private config: CacheConfig;
+	
+	// Method overloading for constructor
+	constructor(config: CacheConfig);
+	constructor(dirName: string, maxCacheSize: string | number, maxCacheAge: string | number, cacheKeyLimit: string | number, fileExtention: string);
+	constructor(
+		configOrDirName: CacheConfig | string, 
+		maxCacheSize?: string | number, 
+		maxCacheAge?: string | number, 
+		cacheKeyLimit?: string | number, 
+		fileExtention?: string
+	) {
+		// Determine if first parameter is a config object or individual parameters
+		if (typeof configOrDirName === "object") {
+			// New configuration-based constructor
+			this.config = { ...DEFAULT_CACHE_CONFIG, ...configOrDirName };
+		} else {
+			// Legacy constructor - create config from individual parameters
+			this.config = {
+				...DEFAULT_CACHE_CONFIG,
+				cacheDir: configOrDirName,
+				maxCacheSize: maxCacheSize || DEFAULT_CACHE_CONFIG.maxCacheSize,
+				maxCacheAge: maxCacheAge || DEFAULT_CACHE_CONFIG.maxCacheAge,
+				maxCacheKeySize: cacheKeyLimit || DEFAULT_CACHE_CONFIG.maxCacheKeySize,
+				fileExtension: fileExtention || DEFAULT_CACHE_CONFIG.fileExtension
+			};
+		}
+
+		this.cacheDir = path.join(process.cwd(), this.config.cacheDir);
 		this.metadataFile = path.join(this.cacheDir, "metadata.json");
 		
 		try {
 			// Parse cache size with flexible units
-			this.maxCacheSize = ConfigParser.parseCacheSize(maxCacheSize);
-			this.maxSizeBytes = ConfigParser.parseSize(maxCacheSize);
+			this.maxCacheSize = ConfigParser.parseCacheSize(this.config.maxCacheSize);
+			this.maxSizeBytes = ConfigParser.parseSize(this.config.maxCacheSize);
 			
 			// Warn users about untested large cache sizes
-			if (this.maxSizeBytes > 500 * 1024 * 1024) { // 500MB
+			if (this.maxSizeBytes > this.config.largeCacheWarningThresholdBytes) {
 				const sizeStr = ConfigParser.formatBytes(this.maxSizeBytes);
-				console.warn("⚠️  WARNING: Cache size ${sizeStr} exceeds 500MB threshold. Diskycache was made for toy projects, not for production environments.");
-				console.warn("   Large cache sizes (${sizeStr}) have not been thoroughly tested.");
+				console.warn(`⚠️  WARNING: Cache size ${sizeStr} exceeds ${ConfigParser.formatBytes(this.config.largeCacheWarningThresholdBytes)} threshold. Diskycache was made for toy projects, not for production environments.`);
+				console.warn("   Large cache sizes (" + sizeStr + ") have not been thoroughly tested.");
 				console.warn("   Consider using a smaller cache size or a different caching solution");
-				console.warn("   for production environments requiring >500MB cache storage.");
+				console.warn("   for production environments requiring >" + ConfigParser.formatBytes(this.config.largeCacheWarningThresholdBytes) + " cache storage.");
 				console.warn("   Current configuration may experience performance issues or memory problems.");
 			}
 		} catch (error) {
-			console.warn(`Invalid cache size format: ${maxCacheSize}, using default 500MB`);
-			this.maxCacheSize = 500;
-			this.maxSizeBytes = 500 * 1024 * 1024;
+			console.warn(`Invalid cache size format: ${this.config.maxCacheSize}, using default ${DEFAULT_CACHE_CONFIG.maxCacheSize}`);
+			this.maxCacheSize = ConfigParser.parseCacheSize(DEFAULT_CACHE_CONFIG.maxCacheSize);
+			this.maxSizeBytes = ConfigParser.parseSize(DEFAULT_CACHE_CONFIG.maxCacheSize);
 		}
 		
 		try {
 			// Parse cache age with flexible units
-			this.maxCacheAge = ConfigParser.parseCacheAge(maxCacheAge);
+			this.maxCacheAge = ConfigParser.parseCacheAge(this.config.maxCacheAge);
 		} catch (error) {
-			console.warn(`Invalid cache age format: ${maxCacheAge}, using default 7 days`);
-			this.maxCacheAge = 7;
+			console.warn(`Invalid cache age format: ${this.config.maxCacheAge}, using default ${DEFAULT_CACHE_CONFIG.maxCacheAge}`);
+			this.maxCacheAge = ConfigParser.parseCacheAge(DEFAULT_CACHE_CONFIG.maxCacheAge);
 		}
 		
 		try {
 			// Parse cache key limit with flexible units
-			const limitKB = ConfigParser.parseCacheKeyLimit(cacheKeyLimit);
-			this.cacheKeyLimitBytes = limitKB * 1024;
+			const limitKB = ConfigParser.parseCacheKeyLimit(this.config.maxCacheKeySize);
+			this.cacheKeyLimitBytes = limitKB * UNIT_CONSTANTS.BYTES.KB;
 		} catch (error) {
-			console.warn(`Invalid cache key limit format: ${cacheKeyLimit}, using default 100KB`);
-			this.cacheKeyLimitBytes = 100 * 1024;
+			console.warn(`Invalid cache key limit format: ${this.config.maxCacheKeySize}, using default ${DEFAULT_CACHE_CONFIG.maxCacheKeySize}`);
+			this.cacheKeyLimitBytes = ConfigParser.parseCacheKeyLimit(DEFAULT_CACHE_CONFIG.maxCacheKeySize) * UNIT_CONSTANTS.BYTES.KB;
 		}
 		
 		this.metadata = new Map(); // Store cache metadata for efficient lookups
-		this.fileExtention = fileExtention;
+		this.fileExtention = this.config.fileExtension;
 		this.contentHashCache = new Map(); // Initialize content hash cache
 		
 		// Initialize index system
@@ -257,7 +275,7 @@ export class CacheService {
 		};
 
 		// Increase max listeners to avoid warnings
-		process.setMaxListeners(process.getMaxListeners() + 10);
+		process.setMaxListeners(process.getMaxListeners() + this.config.processMaxListenersIncrement);
 
 		// Handle various termination signals
 		process.on("SIGINT", () => gracefulShutdown("SIGINT"));
@@ -299,12 +317,12 @@ export class CacheService {
 
 	/**
 	 * Gets the cached cutoff date to avoid recalculating it multiple times.
-	 * Clears cache every 5 minutes for accuracy during long-running operations.
+	 * Clears cache every configured interval for accuracy during long-running operations.
 	 */
 	private getCutoffDate(): Date {
 		const now = new Date();
 		if (!this.cachedCutoffDate || 
-			now.getTime() - this.cachedCutoffDate.getTime() > 5 * 60 * 1000) { // Recalculate every 5 minutes
+			now.getTime() - this.cachedCutoffDate.getTime() > this.config.cutoffDateRecalcIntervalMs) {
 			this.cachedCutoffDate = new Date();
 			this.cachedCutoffDate.setDate(this.cachedCutoffDate.getDate() - this.maxCacheAge);
 		}
@@ -398,9 +416,9 @@ export class CacheService {
 			// Handle special number cases
 			if (!isFinite(data)) return data.toString();
 
-			// For floating point numbers, use fixed precision
+			// For floating point numbers, use configured precision
 			// This prevents 1.1 and 1.10000000001 from being different keys
-			return Number(data.toFixed(10)); // Adjust precision as needed
+			return Number(data.toFixed(this.config.floatingPointPrecision));
 		}
 
 		if (dataType !== "object") return data;
@@ -423,8 +441,8 @@ export class CacheService {
 		const estimatedSizeBytes = this.estimateSizeInBytes(data);
 
 		if (estimatedSizeBytes > this.cacheKeyLimitBytes) {
-			const sizeKB = (estimatedSizeBytes / 1024).toFixed(2);
-			const limitKB = (this.cacheKeyLimitBytes / 1024).toFixed(0);
+			const sizeKB = (estimatedSizeBytes / UNIT_CONSTANTS.BYTES.KB).toFixed(DEFAULT_CACHE_CONFIG.sizeFormatDecimalPlaces);
+			const limitKB = (this.cacheKeyLimitBytes / UNIT_CONSTANTS.BYTES.KB).toFixed(0);
 			throw new Error(
 				`Cache key data too large: ${sizeKB}KB exceeds limit of ${limitKB}KB. ` +
 				"Consider using a reference or hash as the cache key instead of the full object."
@@ -460,15 +478,18 @@ export class CacheService {
 			// Ensure directory exists before writing metadata
 			await fs.mkdir(this.cacheDir, { recursive: true });
 			const metadataArray = Array.from(this.metadata.entries());
-			const metadataContent = JSON.stringify(metadataArray, null, 2);
+			const metadataContent = JSON.stringify(metadataArray, null, this.config.jsonIndentSpaces);
 			
 			// Atomic write: Write to temporary file first, then rename
-			const tempFile = `${this.metadataFile}.tmp.${Date.now()}`;
+			const tempFile = path.join(this.cacheDir, `metadata.json.tmp.${Date.now()}`);
 			await fs.writeFile(tempFile, metadataContent);
 			await fs.rename(tempFile, this.metadataFile);
 			
-		} catch(error) {
-			console.error("Failed to save cache metadata", error);
+		} catch (error: any) {
+			// Only log error if it's not a directory-not-found error during cleanup
+			if (!(error && typeof error === "object" && "code" in error && error.code === "ENOENT")) {
+				console.error("Failed to save cache metadata", error);
+			}
 			
 			// Cleanup temporary files on error
 			try {
@@ -477,7 +498,10 @@ export class CacheService {
 					await fs.unlink(path.join(this.cacheDir, file));
 				}
 			} catch (cleanupError) {
-				console.error("Failed to cleanup temporary metadata files", cleanupError);
+				// Ignore cleanup errors if directory doesn't exist
+				if (!(cleanupError && typeof cleanupError === "object" && "code" in cleanupError && cleanupError.code === "ENOENT")) {
+					console.error("Failed to cleanup temporary metadata files", cleanupError);
+				}
 			}
 		}
 	}
@@ -510,7 +534,7 @@ export class CacheService {
 				} finally {
 					this.metadataSaveTimer = undefined;
 				}
-			}, 100); // Batch saves within 100ms
+			}, this.config.metadataSaveDelayMs); // Batch saves within configured delay
 		}
 	}
 
@@ -549,8 +573,8 @@ export class CacheService {
 
 		if (removedCount > 0) {
 			console.log("Enforced cache size limits", { removedCount,
-				removedSizeMB: Math.round(removedSize / (1024 * 1024) * 100) / 100,
-				currentSizeMB: Math.round((currentSize - removedSize) / (1024 * 1024) * 100) / 100,
+				removedSizeMB: Math.round(removedSize / UNIT_CONSTANTS.BYTES.MB * 100) / 100,
+				currentSizeMB: Math.round((currentSize - removedSize) / UNIT_CONSTANTS.BYTES.MB * 100) / 100,
 				maxSizeMB: this.maxCacheSize
 			});
 		}
@@ -601,7 +625,13 @@ export class CacheService {
 			this.dateIndex?.clear();
 			this.accessCountIndex?.clear();
 			
-			await this.saveMetadata(true); // Force immediate save for cleanup operations
+			// Try to save metadata, but don't fail if directory doesn't exist
+			try {
+				await this.saveMetadata(true); // Force immediate save for cleanup operations
+			} catch (saveError) {
+				// Ignore save errors during cleanup - the cache is already cleared
+				console.warn("Could not save metadata during cleanup:", saveError instanceof Error ? saveError.message : String(saveError));
+			}
 
 			console.log("Cleared Cache", filesToClear.length);
 		} catch(error) {
@@ -674,7 +704,7 @@ export class CacheService {
 			issues.push(`Health check failed: ${error}`);
 		}
 
-		const healthy = issues.length === 0 && metadataConsistency > 90;
+		const healthy = issues.length === 0 && metadataConsistency > this.config.healthCheckConsistencyThreshold;
 
 		return {
 			healthy,
@@ -709,9 +739,9 @@ export class CacheService {
 		return {
 			entriesCount,
 			totalSizeBytes: currentSize,
-			totalSizeMB: parseFloat((currentSize / (1024 * 1024)).toFixed(10)),
+			totalSizeMB: parseFloat((currentSize / UNIT_CONSTANTS.BYTES.MB).toFixed(this.config.statsDecimalPlaces)),
 			maxSizeMB: this.maxCacheSize,
-			usagePercentage: Math.round((currentSize / (this.maxCacheSize * 1024 * 1024)) * 100),
+			usagePercentage: Math.round((currentSize / (this.maxCacheSize * UNIT_CONSTANTS.BYTES.MB)) * 100),
 			totalAccesses,
 			averageAccessesPerEntry: entriesCount > 0 ? Math.round(totalAccesses / entriesCount) : 0,
 			oldestEntryDate: oldestEntry?.createdAt,
@@ -979,7 +1009,7 @@ export class CacheService {
 			if (candidates.length === 0) return null;
 			
 			// Process candidates in parallel batches for better performance
-			const batchSize = Math.min(15, candidates.length); // Process up to 15 files in parallel
+			const batchSize = Math.min(this.config.findKeyBatchSize, candidates.length);
 			
 			for (let i = 0; i < candidates.length; i += batchSize) {
 				const batch = candidates.slice(i, i + batchSize);
@@ -1044,7 +1074,7 @@ export class CacheService {
 			const matchingKeys: string[] = [];
 			
 			// Process candidates in parallel batches for better performance
-			const batchSize = Math.min(20, candidates.length); // Process up to 20 files in parallel
+			const batchSize = Math.min(this.config.findAllKeysBatchSize, candidates.length);
 			
 			for (let i = 0; i < candidates.length; i += batchSize) {
 				const batch = candidates.slice(i, i + batchSize);
@@ -1173,12 +1203,12 @@ export class CacheService {
 			const newSizeBytes = ConfigParser.parseSize(newSize);
 			
 			// Warn users about untested large cache sizes
-			if (newSizeBytes > 500 * 1024 * 1024) { // 500MB
+			if (newSizeBytes > this.config.largeCacheWarningThresholdBytes) {
 				const sizeStr = ConfigParser.formatBytes(newSizeBytes);
-				console.warn("⚠️  WARNING: Cache size ${sizeStr} exceeds 500MB threshold.");
-				console.warn("   Large cache sizes (${sizeStr}) have not been thoroughly tested.");
+				console.warn(`⚠️  WARNING: Cache size ${sizeStr} exceeds ${ConfigParser.formatBytes(this.config.largeCacheWarningThresholdBytes)} threshold.`);
+				console.warn("   Large cache sizes (" + sizeStr + ") have not been thoroughly tested.");
 				console.warn("   Consider using a smaller cache size or a different caching solution");
-				console.warn("   for production environments requiring >500MB cache storage.");
+				console.warn("   for production environments requiring >" + ConfigParser.formatBytes(this.config.largeCacheWarningThresholdBytes) + " cache storage.");
 				console.warn("   Current configuration may experience performance issues or memory problems.");
 			}
 			
@@ -1218,7 +1248,7 @@ export class CacheService {
 	updateCacheKeyLimit(newLimit: string | number): boolean {
 		try {
 			const limitKB = ConfigParser.parseCacheKeyLimit(newLimit);
-			this.cacheKeyLimitBytes = limitKB * 1024;
+			this.cacheKeyLimitBytes = limitKB * UNIT_CONSTANTS.BYTES.KB;
 			return true;
 		} catch (error) {
 			console.error("Failed to update cache key limit:", error);

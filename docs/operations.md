@@ -4,11 +4,97 @@ This document provides detailed sequence diagrams and operation flows for DiskyC
 
 ## Core Operations Overview
 
-The cache system operates through several key workflows that handle data storage, retrieval, cleanup, health monitoring, and multi-dimensional searching with sub-millisecond performance.
+The cache system operates through several key workflows that handle data storage, retrieval, cleanup, health monitoring, and multi-dimensional searching with sub-millisecond performance. The system now supports comprehensive configuration management with method overloading and no magic numbers.
 
-## Primary Operations
+## Configuration Operations
 
-### Set Operation Flow (with Index Updates)
+### Constructor Initialization Flow (Configuration Object)
+
+```mermaid
+sequenceDiagram
+    participant Client
+    participant CacheService
+    participant ConfigParser
+    participant DefaultConfig
+    participant UnitConstants
+
+    Client->>CacheService: new CacheService(config)
+    CacheService->>DefaultConfig: getDefaultConfig()
+    DefaultConfig->>CacheService: DEFAULT_CACHE_CONFIG
+    
+    CacheService->>CacheService: mergeConfig(defaultConfig, userConfig)
+    
+    loop for each config property
+        CacheService->>ConfigParser: parseConfigValue(property, value)
+        ConfigParser->>UnitConstants: getUnitConstants()
+        UnitConstants->>ConfigParser: UNIT_CONSTANTS
+        ConfigParser->>CacheService: parsedValue
+    end
+    
+    CacheService->>CacheService: validateConfiguration()
+    CacheService->>Client: initialized CacheService
+```
+
+### Constructor Initialization Flow (Legacy)
+
+```mermaid
+sequenceDiagram
+    participant Client
+    participant CacheService
+    participant ConfigParser
+    participant DefaultConfig
+
+    Client->>CacheService: new CacheService(dirName, maxCacheSize, maxCacheAge, cacheKeyLimit, fileExtension)
+    CacheService->>DefaultConfig: getDefaultConfig()
+    DefaultConfig->>CacheService: DEFAULT_CACHE_CONFIG
+    
+    CacheService->>ConfigParser: parseSize(maxCacheSize)
+    ConfigParser->>CacheService: parsedSizeBytes
+    
+    CacheService->>ConfigParser: parseCacheAge(maxCacheAge)
+    ConfigParser->>CacheService: parsedAgeDays
+    
+    CacheService->>ConfigParser: parseCacheKeyLimit(cacheKeyLimit)
+    ConfigParser->>CacheService: parsedKeyLimitKB
+    
+    CacheService->>CacheService: buildConfigObject()
+    CacheService->>Client: initialized CacheService
+```
+
+### Configuration Validation Flow
+
+```mermaid
+sequenceDiagram
+    participant CacheService
+    participant ConfigParser
+    participant UnitConstants
+    participant WarningSystem
+
+    CacheService->>ConfigParser: validateConfiguration(config)
+    
+    ConfigParser->>UnitConstants: validateSizeUnits(config.maxCacheSize)
+    UnitConstants->>ConfigParser: valid/invalid
+    
+    ConfigParser->>UnitConstants: validateTimeUnits(config.maxCacheAge)
+    UnitConstants->>ConfigParser: valid/invalid
+    
+    ConfigParser->>UnitConstants: validateKeyLimitUnits(config.maxCacheKeySize)
+    UnitConstants->>ConfigParser: valid/invalid
+    
+    alt invalid configuration
+        ConfigParser->>CacheService: fallbackToDefaults()
+        CacheService->>WarningSystem: logWarning("Invalid config, using defaults")
+    end
+    
+    alt large cache size
+        ConfigParser->>WarningSystem: checkLargeCacheWarning(config.maxCacheSize)
+        WarningSystem->>CacheService: console.warn("Large cache warning")
+    end
+    
+    ConfigParser->>CacheService: validatedConfig
+```
+
+### Set Operation Flow (with Index Updates and Configuration)
 
 ```mermaid
 sequenceDiagram
@@ -19,9 +105,15 @@ sequenceDiagram
     participant FileManager
     participant IndexSystem
     participant BatchScheduler
+    participant ConfigManager
 
     Client->>CacheService: set(keyData, data)
-    CacheService->>HashManager: normalizeForHashing(keyData)
+    CacheService->>ConfigManager: getConfig()
+    ConfigManager->>CacheService: currentConfig
+    
+    CacheService->>CacheService: validateCacheKeySize(keyData, config.maxCacheKeySize)
+    
+    CacheService->>HashManager: normalizeForHashing(keyData, config.floatingPointPrecision)
     HashManager->>CacheService: normalized object
     CacheService->>HashManager: generateCacheKey(normalized)
     HashManager->>CacheService: sha256Hash
@@ -32,7 +124,7 @@ sequenceDiagram
     CacheService->>IndexSystem: removeFromIndexes(oldEntry)
     IndexSystem->>CacheService: removed
     
-    CacheService->>FileManager: writeFile(hash.extention, data)
+    CacheService->>FileManager: writeFile(hash.config.fileExtension, data)
     FileManager->>CacheService: success/failure
     
     CacheService->>IndexSystem: addToIndexes(hash, metadata, contentHash)
@@ -42,8 +134,8 @@ sequenceDiagram
     IndexSystem->>IndexSystem: updateAccessCountIndex
     
     CacheService->>MetadataManager: updateMetadata(hash, metadata)
-    MetadataManager->>BatchScheduler: scheduleMetadataSave()
-    BatchScheduler->>BatchScheduler: setTimeout(100ms)
+    MetadataManager->>BatchScheduler: scheduleMetadataSave(config.metadataSaveDelayMs)
+    BatchScheduler->>BatchScheduler: setTimeout(config.metadataSaveDelayMs)
     
     CacheService->>Client: boolean success
 ```
@@ -279,7 +371,7 @@ sequenceDiagram
     MetadataManager->>CacheService: success
 ```
 
-### Batch Metadata Save Flow
+### Batch Metadata Save Flow (with Configuration)
 
 ```mermaid
 sequenceDiagram
@@ -288,19 +380,25 @@ sequenceDiagram
     participant MetadataManager
     participant FileManager
     participant TempFileManager
+    participant ConfigManager
 
     Operations->>BatchScheduler: scheduleMetadataSave()
+    BatchScheduler->>ConfigManager: getConfig()
+    ConfigManager->>BatchScheduler: currentConfig
     
     alt immediate save
         BatchScheduler->>MetadataManager: saveMetadata(true)
     else batch save
-        BatchScheduler->>BatchScheduler: setTimeout(100ms)
-        Note over BatchScheduler: Wait for batch period
+        BatchScheduler->>BatchScheduler: setTimeout(config.metadataSaveDelayMs)
+        Note over BatchScheduler: Wait for configurable batch period
         
         BatchScheduler->>MetadataManager: saveMetadata(false)
     end
     
-    MetadataManager->>FileManager: serializeMetadata()
+    MetadataManager->>ConfigManager: getConfig()
+    ConfigManager->>MetadataManager: currentConfig
+    
+    MetadataManager->>FileManager: serializeMetadata(config.jsonIndentSpaces)
     FileManager->>MetadataManager: metadataJSON
     
     MetadataManager->>TempFileManager: writeFile(tempFile, json)

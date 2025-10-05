@@ -9,38 +9,67 @@ This document provides practical examples, common patterns, and real-world usage
 ```typescript
 import { CacheService } from 'diskycache';
 
-// Create cache instance with flexible configuration
-const cache = new CacheService("simple-cache", "100MB", "7d", "50KB", "json");
+// Modern configuration object approach (recommended)
+const cache = new CacheService({
+	cacheDir: "simple-cache",
+	maxCacheSize: "100MB",
+	maxCacheAge: "7d",
+	maxCacheKeySize: "50KB",
+	fileExtension: "json"
+});
 
 // Store simple string data
 await cache.set("user:123", JSON.stringify({
-    id: 123,
-    name: "John Doe",
-    email: "john@example.com"
+	id: 123,
+	name: "John Doe",
+	email: "john@example.com"
 }));
 
 // Retrieve and parse data
 const userData = await cache.get("user:123");
 if (userData) {
-    const user = JSON.parse(userData.toString());
-    console.log(`User: ${user.name}`);
+	const user = JSON.parse(userData.toString());
+	console.log(`User: ${user.name}`);
 }
 ```
 
 ### Flexible Configuration Examples
 
 ```typescript
-// Different size units
-const smallCache = new CacheService("small", "10MB", "1d", "10KB", "json");
-const mediumCache = new CacheService("medium", "500MB", "7d", "100KB", "json");
-const largeCache = new CacheService("large", "1GB", "30d", "1MB", "bin"); // Triggers warning
+// Configuration object approach with different settings
+const smallCache = new CacheService({
+	cacheDir: "small",
+	maxCacheSize: "10MB",
+	maxCacheAge: "1d",
+	maxCacheKeySize: "10KB",
+	fileExtension: "json",
+	metadataSaveDelayMs: 25, // Faster saves
+	findKeyBatchSize: 10     // Smaller batches
+});
 
-// Different time units
-const shortCache = new CacheService("short", "50MB", "1h", "25KB", "json");
-const longCache = new CacheService("long", "200MB", "1w", "50KB", "json");
-const preciseCache = new CacheService("precise", "100MB", "3600s", "25KB", "json");
+const mediumCache = new CacheService({
+	cacheDir: "medium",
+	maxCacheSize: "500MB",
+	maxCacheAge: "7d",
+	maxCacheKeySize: "100KB",
+	fileExtension: "json",
+	metadataSaveDelayMs: 100, // Default saves
+	findKeyBatchSize: 15       // Default batches
+});
 
-// Traditional numeric values (backward compatible)
+const largeCache = new CacheService({
+	cacheDir: "large",
+	maxCacheSize: "1GB",      // Triggers warning
+	maxCacheAge: "30d",
+	maxCacheKeySize: "1MB",
+	fileExtension: "bin",
+	metadataSaveDelayMs: 200, // Less frequent saves
+	findKeyBatchSize: 30,     // Larger batches
+	findAllKeysBatchSize: 40,
+	healthCheckConsistencyThreshold: 95 // Stricter health checks
+});
+
+// Legacy constructor approach (backward compatible)
 const legacyCache = new CacheService("legacy", 100, 7, 50, "json");
 ```
 
@@ -152,9 +181,18 @@ console.log({
 class ApiCache {
     private cache: CacheService;
     
-    constructor(cacheDir: string) {
-        this.cache = new CacheService(cacheDir, "200MB", "1d", "100KB", "json");
-    }
+	constructor(cacheDir: string) {
+		// Modern configuration object approach
+		this.cache = new CacheService({
+			cacheDir: cacheDir,
+			maxCacheSize: "200MB",
+			maxCacheAge: "1d",
+			maxCacheKeySize: "100KB",
+			fileExtension: "json",
+			metadataSaveDelayMs: 50, // Faster saves for API responses
+			findKeyBatchSize: 20      // Optimized for API lookups
+		});
+	}
     
     async getCachedResponse(endpoint: string, params: Record<string, any>): Promise<any> {
         const cacheKey = { endpoint, params };
@@ -194,9 +232,19 @@ class SessionStore {
     private cache: CacheService;
     private sessionTimeout = 3600 * 24; // 24 hours
     
-    constructor(sessionDir: string) {
-        this.cache = new CacheService(sessionDir, "50MB", "1d", "50KB", "session");
-    }
+	constructor(sessionDir: string) {
+		// High-performance session cache configuration
+		this.cache = new CacheService({
+			cacheDir: sessionDir,
+			maxCacheSize: "50MB",
+			maxCacheAge: "1d",
+			maxCacheKeySize: "50KB",
+			fileExtension: "session",
+			metadataSaveDelayMs: 25,  // Very fast saves for sessions
+			cutoffDateRecalcIntervalMs: 60000, // Check expiration every minute
+			findKeyBatchSize: 10       // Smaller batches for sessions
+		});
+	}
     
     async getSession(sessionId: string): Promise<any> {
         const sessionKey = `session:${sessionId}`;
@@ -231,9 +279,20 @@ class SessionStore {
 class DatabaseCache {
     private cache: CacheService;
     
-    constructor(cacheDir: string) {
-        this.cache = new CacheService(cacheDir, "1GB", "7d", "200KB", "query");
-    }
+	constructor(cacheDir: string) {
+		// Large cache configuration for database queries
+		this.cache = new CacheService({
+			cacheDir: cacheDir,
+			maxCacheSize: "1GB",      // Large size for query results
+			maxCacheAge: "7d",
+			maxCacheKeySize: "200KB",
+			fileExtension: "query",
+			metadataSaveDelayMs: 200, // Less frequent saves for performance
+			findKeyBatchSize: 25,     // Larger batches for queries
+			findAllKeysBatchSize: 30,
+			healthCheckConsistencyThreshold: 95 // Stricter health checks
+		});
+	}
     
     async cacheQuery<T>(
         query: string, 

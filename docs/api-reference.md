@@ -4,9 +4,76 @@ Complete API documentation for all DiskyCache methods, types, and configuration 
 
 ## Constructor
 
-### `new CacheService(dirName, maxCacheSize?, maxCacheAge?, cacheKeyLimit?, fileExtension?)`
+### `new CacheService(config: CacheConfig)`
 
-Creates a new DiskyCache instance with flexible unit support.
+Creates a new DiskyCache instance using a configuration object (recommended approach).
+
+**Parameters:**
+
+| Property | Type | Default | Description |
+|----------|------|---------|-------------|
+| `cacheDir` | `string` | `"cache"` | Cache directory path |
+| `maxCacheSize` | `string \| number` | `"500MB"` | Maximum cache size (supports B, KB, MB, GB, TB) |
+| `maxCacheAge` | `string \| number` | `"7d"` | Maximum age before expiration (supports ms, s, m, h, d, w) |
+| `maxCacheKeySize` | `string \| number` | `"100KB"` | Maximum key size (supports B, KB, MB, GB, TB) |
+| `fileExtension` | `string` | `"cache"` | File extension for cached files |
+| `metadataSaveDelayMs` | `number` | `100` | Batch metadata save delay in milliseconds |
+| `cutoffDateRecalcIntervalMs` | `number` | `300000` | Cutoff date recalculation interval (5 minutes) |
+| `floatingPointPrecision` | `number` | `10` | Floating point precision for hash normalization |
+| `healthCheckConsistencyThreshold` | `number` | `90` | Health check metadata consistency threshold percentage |
+| `largeCacheWarningThresholdBytes` | `number` | `524288000` | Large cache size warning threshold (500MB) |
+| `processMaxListenersIncrement` | `number` | `10` | Process max listeners increment for graceful shutdown |
+| `findKeyBatchSize` | `number` | `15` | Batch processing size for findKeyByValue operations |
+| `findAllKeysBatchSize` | `number` | `20` | Batch processing size for findAllKeysByValue operations |
+| `jsonIndentSpaces` | `number` | `2` | JSON stringify indentation spaces |
+| `sizeFormatDecimalPlaces` | `number` | `2` | Size formatting decimal places |
+| `timeFormatDecimalPlaces` | `number` | `2` | Time formatting decimal places |
+| `statsDecimalPlaces` | `number` | `10` | Statistics calculation decimal places |
+
+**Examples:**
+```ts
+// Minimal configuration (uses defaults for unspecified properties)
+const cache1 = new CacheService({
+	cacheDir: "my-cache",
+	maxCacheSize: "1GB",
+	maxCacheAge: "30d"
+});
+
+// Full custom configuration
+const cache2 = new CacheService({
+	cacheDir: "production-cache",
+	maxCacheSize: "2GB",
+	maxCacheAge: "7d",
+	maxCacheKeySize: "1MB",
+	fileExtension: "json",
+	metadataSaveDelayMs: 50,
+	cutoffDateRecalcIntervalMs: 60000, // 1 minute
+	floatingPointPrecision: 15,
+	healthCheckConsistencyThreshold: 95,
+	largeCacheWarningThresholdBytes: 100 * 1024 * 1024, // 100MB
+	processMaxListenersIncrement: 5,
+	findKeyBatchSize: 10,
+	findAllKeysBatchSize: 15,
+	jsonIndentSpaces: 4,
+	sizeFormatDecimalPlaces: 3,
+	timeFormatDecimalPlaces: 3,
+	statsDecimalPlaces: 15
+});
+
+// High-performance configuration
+const cache3 = new CacheService({
+	cacheDir: "fast-cache",
+	maxCacheSize: "500MB",
+	maxCacheAge: "1d",
+	metadataSaveDelayMs: 25, // Faster saves
+	findKeyBatchSize: 25, // Larger batches
+	findAllKeysBatchSize: 30
+});
+```
+
+### `new CacheService(dirName, maxCacheSize?, maxCacheAge?, cacheKeyLimit?, fileExtension?)` (Legacy)
+
+Creates a new DiskyCache instance with flexible unit support (backward compatible).
 
 **Parameters:**
 
@@ -441,6 +508,29 @@ try {
 ```
 
 ## Data Types
+
+### `CacheConfig`
+```ts
+interface CacheConfig {
+	cacheDir: string;                    // Cache directory path
+	maxCacheSize: string | number;        // Maximum cache size (supports B, KB, MB, GB, TB)
+	maxCacheAge: string | number;         // Maximum age before expiration (supports ms, s, m, h, d, w)
+	maxCacheKeySize: string | number;     // Maximum key size (supports B, KB, MB, GB, TB)
+	fileExtension: string;                // File extension for cached files
+	metadataSaveDelayMs: number;         // Batch metadata save delay in milliseconds
+	cutoffDateRecalcIntervalMs: number;  // Cutoff date recalculation interval in milliseconds
+	floatingPointPrecision: number;       // Floating point precision for hash normalization
+	healthCheckConsistencyThreshold: number; // Health check metadata consistency threshold percentage
+	largeCacheWarningThresholdBytes: number; // Large cache size warning threshold in bytes
+	processMaxListenersIncrement: number;    // Process max listeners increment for graceful shutdown
+	findKeyBatchSize: number;            // Batch processing size for findKeyByValue operations
+	findAllKeysBatchSize: number;        // Batch processing size for findAllKeysByValue operations
+	jsonIndentSpaces: number;           // JSON stringify indentation spaces
+	sizeFormatDecimalPlaces: number;    // Size formatting decimal places
+	timeFormatDecimalPlaces: number;    // Time formatting decimal places
+	statsDecimalPlaces: number;          // Statistics calculation decimal places
+}
+```
 
 ### `CacheMetadata`
 ```ts

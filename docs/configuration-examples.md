@@ -1,18 +1,93 @@
 # Configuration Examples
 
-This document demonstrates the flexible configuration options available in the cache system.
+This document demonstrates the flexible configuration options available in the cache system, including the new configuration object approach and legacy constructor support.
 
-## Basic Usage
+## Configuration Object Approach (Recommended)
+
+The modern configuration object approach provides comprehensive control over all cache settings with sensible defaults:
 
 ```typescript
 import { CacheService } from "./src/cache";
 
+// Minimal configuration (uses defaults for unspecified properties)
+const cache1 = new CacheService({
+	cacheDir: "my-cache",
+	maxCacheSize: "1GB",
+	maxCacheAge: "30d"
+});
+
+// Full custom configuration
+const cache2 = new CacheService({
+	cacheDir: "production-cache",
+	maxCacheSize: "2GB",
+	maxCacheAge: "7d",
+	maxCacheKeySize: "1MB",
+	fileExtension: "json",
+	metadataSaveDelayMs: 50,
+	cutoffDateRecalcIntervalMs: 60000, // 1 minute
+	floatingPointPrecision: 15,
+	healthCheckConsistencyThreshold: 95,
+	largeCacheWarningThresholdBytes: 100 * 1024 * 1024, // 100MB
+	processMaxListenersIncrement: 5,
+	findKeyBatchSize: 10,
+	findAllKeysBatchSize: 15,
+	jsonIndentSpaces: 4,
+	sizeFormatDecimalPlaces: 3,
+	timeFormatDecimalPlaces: 3,
+	statsDecimalPlaces: 15
+});
+
+// High-performance configuration
+const cache3 = new CacheService({
+	cacheDir: "fast-cache",
+	maxCacheSize: "500MB",
+	maxCacheAge: "1d",
+	metadataSaveDelayMs: 25, // Faster saves
+	findKeyBatchSize: 25, // Larger batches
+	findAllKeysBatchSize: 30
+});
+```
+
+## Legacy Constructor (Backward Compatible)
+
+The traditional constructor still works for existing code:
+
+```typescript
 // Traditional numeric values (backward compatible)
 const cache1 = new CacheService("cache_dir", 500, 7, 100, "bin");
 
 // Flexible string units
 const cache2 = new CacheService("cache_dir", "500MB", "7d", "100KB", "bin");
 ```
+
+## Configuration Object Properties
+
+The configuration object supports all internal cache settings with sensible defaults:
+
+### Core Settings
+- `cacheDir`: Cache directory path (default: "cache")
+- `maxCacheSize`: Maximum cache size (default: "500MB")
+- `maxCacheAge`: Maximum age before expiration (default: "7d")
+- `maxCacheKeySize`: Maximum key size (default: "100KB")
+- `fileExtension`: File extension for cached files (default: "cache")
+
+### Performance Settings
+- `metadataSaveDelayMs`: Batch metadata save delay (default: 100ms)
+- `cutoffDateRecalcIntervalMs`: Cutoff date recalculation interval (default: 5 minutes)
+- `findKeyBatchSize`: Batch size for findKeyByValue operations (default: 15)
+- `findAllKeysBatchSize`: Batch size for findAllKeysByValue operations (default: 20)
+
+### Precision Settings
+- `floatingPointPrecision`: Hash normalization precision (default: 10)
+- `sizeFormatDecimalPlaces`: Size formatting precision (default: 2)
+- `timeFormatDecimalPlaces`: Time formatting precision (default: 2)
+- `statsDecimalPlaces`: Statistics calculation precision (default: 10)
+
+### System Settings
+- `healthCheckConsistencyThreshold`: Health check threshold percentage (default: 90%)
+- `largeCacheWarningThresholdBytes`: Large cache warning threshold (default: 500MB)
+- `processMaxListenersIncrement`: Process listener increment (default: 10)
+- `jsonIndentSpaces`: JSON formatting indentation (default: 2)
 
 ## Size Configuration
 
@@ -144,49 +219,101 @@ try {
 
 ### Development Environment
 ```typescript
-// Small cache for development
-const devCache = new CacheService(
-    "dev_cache",
-    "100MB",    // Small size
-    "1h",       // Short lifetime
-    "50KB",     // Small key limit
-    "dev"
+// Configuration object approach
+const devCache = new CacheService({
+	cacheDir: "dev_cache",
+	maxCacheSize: "100MB",    // Small size
+	maxCacheAge: "1h",        // Short lifetime
+	maxCacheKeySize: "50KB",  // Small key limit
+	fileExtension: "dev",
+	metadataSaveDelayMs: 25,  // Faster saves for development
+	findKeyBatchSize: 10      // Smaller batches
+});
+
+// Legacy approach
+const devCacheLegacy = new CacheService(
+	"dev_cache",
+	"100MB",    // Small size
+	"1h",       // Short lifetime
+	"50KB",     // Small key limit
+	"dev"
 );
 ```
 
 ### Production Environment
 ```typescript
-// Large cache for production
-const prodCache = new CacheService(
-    "prod_cache",
-    "10GB",     // Large size
-    "30d",      // Long lifetime
-    "1MB",      // Large key limit
-    "prod"
+// Configuration object approach
+const prodCache = new CacheService({
+	cacheDir: "prod_cache",
+	maxCacheSize: "10GB",     // Large size
+	maxCacheAge: "30d",       // Long lifetime
+	maxCacheKeySize: "1MB",   // Large key limit
+	fileExtension: "prod",
+	metadataSaveDelayMs: 200, // Less frequent saves for performance
+	findKeyBatchSize: 30,     // Larger batches
+	findAllKeysBatchSize: 40,
+	healthCheckConsistencyThreshold: 95, // Stricter health checks
+	largeCacheWarningThresholdBytes: 2 * 1024 * 1024 * 1024 // 2GB warning
+});
+
+// Legacy approach
+const prodCacheLegacy = new CacheService(
+	"prod_cache",
+	"10GB",     // Large size
+	"30d",      // Long lifetime
+	"1MB",      // Large key limit
+	"prod"
 );
 ```
 
 ### Testing Environment
 ```typescript
-// Fast-expiring cache for testing
-const testCache = new CacheService(
-    "test_cache",
-    "50MB",     // Medium size
-    "5m",       // Very short lifetime
-    "100KB",    // Standard key limit
-    "test"
+// Configuration object approach
+const testCache = new CacheService({
+	cacheDir: "test_cache",
+	maxCacheSize: "50MB",     // Medium size
+	maxCacheAge: "5m",        // Very short lifetime
+	maxCacheKeySize: "100KB", // Standard key limit
+	fileExtension: "test",
+	metadataSaveDelayMs: 10, // Very fast saves for testing
+	cutoffDateRecalcIntervalMs: 30000, // Check expiration every 30 seconds
+	findKeyBatchSize: 5      // Small batches for testing
+});
+
+// Legacy approach
+const testCacheLegacy = new CacheService(
+	"test_cache",
+	"50MB",     // Medium size
+	"5m",       // Very short lifetime
+	"100KB",    // Standard key limit
+	"test"
 );
 ```
 
 ### High-Performance Environment
 ```typescript
-// Maximum performance cache
-const perfCache = new CacheService(
-    "perf_cache",
-    "1TB",      // Maximum size - WARNING: Will trigger size warning
-    "1w",       // Long lifetime
-    "2MB",      // Large key limit
-    "perf"
+// Configuration object approach
+const perfCache = new CacheService({
+	cacheDir: "perf_cache",
+	maxCacheSize: "1TB",      // Maximum size - WARNING: Will trigger size warning
+	maxCacheAge: "1w",         // Long lifetime
+	maxCacheKeySize: "2MB",    // Large key limit
+	fileExtension: "perf",
+	metadataSaveDelayMs: 50,  // Balanced save frequency
+	findKeyBatchSize: 50,     // Large batches for throughput
+	findAllKeysBatchSize: 60,
+	cutoffDateRecalcIntervalMs: 120000, // Check expiration every 2 minutes
+	healthCheckConsistencyThreshold: 98, // Very strict health checks
+	largeCacheWarningThresholdBytes: 5 * 1024 * 1024 * 1024 // 5GB warning
+});
+
+// Legacy approach
+const perfCacheLegacy = new CacheService(
+	"perf_cache",
+	"1TB",      // Maximum size - WARNING: Will trigger size warning
+	"1w",       // Long lifetime
+	"2MB",      // Large key limit
+	"perf"
 );
 ```
 
@@ -234,9 +361,25 @@ const cache3 = new CacheService("dir", "500MB", "7d", "invalid", "bin");
 
 ## Best Practices
 
+### Configuration Object Approach
+1. **Use configuration objects**: Prefer the modern configuration object approach for new projects
+2. **Specify only what you need**: Use minimal configuration and let defaults handle the rest
+3. **Group related settings**: Organize configuration by purpose (core, performance, precision, system)
+4. **Document custom settings**: Add comments for non-default values explaining why they're needed
+5. **Use meaningful names**: Choose descriptive cache directory names and file extensions
+
+### Legacy Constructor Approach
 1. **Use descriptive units**: "500MB" is clearer than "500"
 2. **Choose appropriate units**: Use "GB" for large sizes, "KB" for small sizes
 3. **Be consistent**: Use the same unit type throughout your application
 4. **Validate configurations**: Check for errors in configuration parsing
 5. **Monitor usage**: Use `getConfiguration()` to verify settings
 6. **Update dynamically**: Use update methods for runtime configuration changes
+
+### General Recommendations
+1. **Start with defaults**: Begin with default configuration and tune as needed
+2. **Test thoroughly**: Especially for large cache sizes (>500MB)
+3. **Monitor performance**: Use health checks and statistics to monitor cache behavior
+4. **Plan for growth**: Consider cache size requirements as your application scales
+5. **Use appropriate lifetimes**: Balance cache hit rates with memory usage
+6. **Handle errors gracefully**: Implement proper error handling for cache operations

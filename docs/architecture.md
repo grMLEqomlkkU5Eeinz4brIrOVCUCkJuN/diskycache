@@ -4,7 +4,7 @@ This document explains the system architecture, design principles, and component
 
 ## System Overview
 
-DiskyCache is a high-performance disk-backed caching system designed for Node.js applications. It features comprehensive indexing for sub-millisecond searches, flexible configuration with human-readable units, and automatic cleanup with data protection mechanisms.
+DiskyCache is a high-performance disk-backed caching system designed for Node.js applications. It features comprehensive indexing for sub-millisecond searches, flexible configuration with human-readable units, comprehensive configuration object support with method overloading, and automatic cleanup with data protection mechanisms.
 
 ### Core Design Principles
 
@@ -15,6 +15,9 @@ DiskyCache is a high-performance disk-backed caching system designed for Node.js
 5. **Maintainability**: Consistent cleanup and health monitoring
 6. **Scalability**: Configurable size limits with production warnings
 7. **Efficiency**: O(1) lookups for indexed content and metadata
+8. **Configuration**: No magic numbers - all constants are configurable with sane defaults
+9. **Backward Compatibility**: Legacy constructor support for existing code
+10. **Method Overloading**: Multiple constructor signatures for different use cases
 
 ## Component Architecture
 
@@ -36,6 +39,15 @@ DiskyCache is a high-performance disk-backed caching system designed for Node.js
 │ │ │ Set<keys>>  │ │ size,   │ │ date,   │ │ Set<keys>>              │ │ │
 │ │ │             │ │ Set<    │ │ Set<    │ │                         │ │ │
 │ │ │             │ │ keys>>  │ │ keys>>  │ │                         │ │ │
+│ │ └─────────────┘ └─────────┘ └─────────┘ └─────────────────────────┘ │ │
+│ └─────────────────────────────────────────────────────────────────────┘ │
+│ ┌─────────────────────────────────────────────────────────────────────┐ │
+│ │                Configuration System                                 │ │
+│ │ ┌─────────────┐ ┌─────────┐ ┌─────────┐ ┌─────────────────────────┐ │ │
+│ │ │ Config      │ │ Default │ │ Unit    │ │ Method                  │ │ │
+│ │ │ Object      │ │ Values  │ │ Constants│ │ Overloading             │ │ │
+│ │ │ Interface   │ │ CacheConfig│ UNIT_CONSTANTS│ Constructor        │ │ │
+│ │ │             │ │         │ │         │ │ Signatures              │ │ │
 │ │ └─────────────┘ └─────────┘ └─────────┘ └─────────────────────────┘ │ │
 │ └─────────────────────────────────────────────────────────────────────┘ │
 │ ┌─────────────────────────────────────────────────────────────────────┐ │
@@ -86,6 +98,16 @@ DiskyCache is a high-performance disk-backed caching system designed for Node.js
 - **Validation**: Provides clear error messages for invalid configurations
 - **Fallback Handling**: Uses defaults with warnings for invalid input
 - **Runtime Updates**: Enables dynamic configuration changes
+- **Method Overloading**: Supports both configuration object and legacy constructor approaches
+- **No Magic Numbers**: All internal constants are configurable with sensible defaults
+
+### Configuration System
+- **Configuration Object**: Modern interface-based configuration with comprehensive options
+- **Default Values**: Sane defaults for all configurable parameters
+- **Unit Constants**: Centralized constants for consistent unit conversions
+- **Method Overloading**: Multiple constructor signatures for different use cases
+- **Backward Compatibility**: Legacy constructor still supported for existing code
+- **Type Safety**: Full TypeScript support with proper interfaces
 
 ### Index System
 - **Content Hash Index**: O(1) content-based lookups
@@ -142,6 +164,117 @@ Example:
 ```
 
 ## Configuration System Architecture
+
+### Configuration Object Interface
+```typescript
+interface CacheConfig {
+	cacheDir: string;                    // Cache directory path
+	maxCacheSize: string | number;        // Maximum cache size (supports B, KB, MB, GB, TB)
+	maxCacheAge: string | number;         // Maximum age before expiration (supports ms, s, m, h, d, w)
+	maxCacheKeySize: string | number;     // Maximum key size (supports B, KB, MB, GB, TB)
+	fileExtension: string;                // File extension for cached files
+	metadataSaveDelayMs: number;         // Batch metadata save delay in milliseconds
+	cutoffDateRecalcIntervalMs: number;  // Cutoff date recalculation interval in milliseconds
+	floatingPointPrecision: number;       // Floating point precision for hash normalization
+	healthCheckConsistencyThreshold: number; // Health check metadata consistency threshold percentage
+	largeCacheWarningThresholdBytes: number; // Large cache size warning threshold in bytes
+	processMaxListenersIncrement: number;    // Process max listeners increment for graceful shutdown
+	findKeyBatchSize: number;            // Batch processing size for findKeyByValue operations
+	findAllKeysBatchSize: number;        // Batch processing size for findAllKeysByValue operations
+	jsonIndentSpaces: number;           // JSON stringify indentation spaces
+	sizeFormatDecimalPlaces: number;    // Size formatting decimal places
+	timeFormatDecimalPlaces: number;    // Time formatting decimal places
+	statsDecimalPlaces: number;          // Statistics calculation decimal places
+}
+```
+
+### Default Configuration Values
+```typescript
+const DEFAULT_CACHE_CONFIG: CacheConfig = {
+	cacheDir: "diskycache",
+	maxCacheSize: "500MB",
+	maxCacheAge: "7d",
+	maxCacheKeySize: "100KB",
+	fileExtension: "cache",
+	metadataSaveDelayMs: 100,
+	cutoffDateRecalcIntervalMs: 5 * 60 * 1000, // 5 minutes
+	floatingPointPrecision: 10,
+	healthCheckConsistencyThreshold: 90,
+	largeCacheWarningThresholdBytes: 500 * 1024 * 1024, // 500MB
+	processMaxListenersIncrement: 10,
+	findKeyBatchSize: 15,
+	findAllKeysBatchSize: 20,
+	jsonIndentSpaces: 2,
+	sizeFormatDecimalPlaces: 2,
+	timeFormatDecimalPlaces: 2,
+	statsDecimalPlaces: 10
+};
+```
+
+### Unit Constants System
+```typescript
+const UNIT_CONSTANTS = {
+	BYTES: {
+		B: 1,
+		KB: 1024,
+		MB: 1024 * 1024,
+		GB: 1024 * 1024 * 1024,
+		TB: 1024 * 1024 * 1024 * 1024
+	},
+	TIME: {
+		ms: 1,
+		s: 1000,
+		m: 60 * 1000,
+		h: 60 * 60 * 1000,
+		d: 24 * 60 * 60 * 1000,
+		w: 7 * 24 * 60 * 60 * 1000
+	},
+	FORMATTING: {
+		BYTE_UNITS: ["B", "KB", "MB", "GB", "TB"],
+		TIME_UNITS: [
+			{ name: "ms", value: 1 },
+			{ name: "s", value: 1000 },
+			{ name: "m", value: 60 * 1000 },
+			{ name: "h", value: 60 * 60 * 1000 },
+			{ name: "d", value: 24 * 60 * 60 * 1000 },
+			{ name: "w", value: 7 * 24 * 60 * 60 * 1000 }
+		]
+	}
+};
+```
+
+### Method Overloading Architecture
+```typescript
+// Modern configuration object constructor (recommended)
+constructor(config: CacheConfig);
+
+// Legacy constructor (backward compatible)
+constructor(dirName: string, maxCacheSize: string | number, maxCacheAge: string | number, cacheKeyLimit: string | number, fileExtention: string);
+
+// Implementation with automatic detection
+constructor(
+	configOrDirName: CacheConfig | string, 
+	maxCacheSize?: string | number, 
+	maxCacheAge?: string | number, 
+	cacheKeyLimit?: string | number, 
+	fileExtention?: string
+) {
+	if (typeof configOrDirName === 'object') {
+		// Configuration object approach
+		this.config = { ...DEFAULT_CACHE_CONFIG, ...configOrDirName };
+	} else {
+		// Legacy constructor approach
+		this.config = {
+			...DEFAULT_CACHE_CONFIG,
+			cacheDir: configOrDirName,
+			maxCacheSize: maxCacheSize || DEFAULT_CACHE_CONFIG.maxCacheSize,
+			maxCacheAge: maxCacheAge || DEFAULT_CACHE_CONFIG.maxCacheAge,
+			maxCacheKeySize: cacheKeyLimit || DEFAULT_CACHE_CONFIG.maxCacheKeySize,
+			fileExtension: fileExtention || DEFAULT_CACHE_CONFIG.fileExtension
+		};
+	}
+}
+```
 
 ### Flexible Unit Parsing
 ```

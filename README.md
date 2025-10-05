@@ -2,7 +2,11 @@
 
 [![npm version](https://img.shields.io/npm/v/diskycache.svg)](https://www.npmjs.com/package/diskycache)
 
-A high-performance file system-based caching library for Node.js applications. Features comprehensive indexing, flexible configuration with human-readable units, and sub-millisecond content searches with automatic cleanup based on usage patterns.
+A file system-based caching library for Node.js applications. Features comprehensive indexing, flexible configuration with human-readable units, and sub-millisecond content searches with automatic cleanup based on usage patterns.
+
+# STOP
+
+This is probably not for you. I made this over-engineered cache solution for toy projects and I honestly recommend that you use something else, such as redis. You are probably better off implementing your own cache.
 
 ---
 
@@ -10,6 +14,8 @@ A high-performance file system-based caching library for Node.js applications. F
 
 * **Disk-based storage**: Files are cached to disk for persistence across application restarts
 * **Flexible configuration**: Human-readable units (B, KB, MB, GB, TB for size; ms, s, m, h, d, w for time)
+* **Configuration object support**: Modern configuration object constructor with comprehensive options and sane defaults
+* **Backward compatibility**: Legacy constructor still supported for existing code
 * **Comprehensive indexing**: Multi-dimensional indexes for O(1) lookups by content, size, date, and access count
 * **Sub-millisecond searches**: Index-based content searches with 97% performance improvement
 * **LRU eviction**: Automatic removal of least recently used entries when size limits are reached
@@ -18,6 +24,7 @@ A high-performance file system-based caching library for Node.js applications. F
 * **Metadata tracking**: Persistent cache statistics and access tracking
 * **Runtime configuration**: Update cache settings dynamically without restart
 * **Production warnings**: Automatic warnings for untested large cache configurations
+* **No magic numbers**: All internal constants are configurable with sensible defaults
 
 ---
 
@@ -31,11 +38,21 @@ npm install diskycache
 
 ## Basic Usage
 
+### Configuration Object Constructor (Recommended)
+
 ```js
 import { CacheService } from "diskycache";
 
-// Flexible configuration with human-readable units
-const cache = new CacheService("cache_dir", "100MB", "7d", "100KB", "json");
+// Modern configuration object approach
+const cache = new CacheService({
+	cacheDir: "cache_dir",
+	maxCacheSize: "100MB",
+	maxCacheAge: "7d",
+	maxCacheKeySize: "100KB",
+	fileExtension: "json",
+	metadataSaveDelayMs: 100,
+	floatingPointPrecision: 10
+});
 
 // Store data in cache
 await cache.set("user_123", JSON.stringify({ name: "John", age: 30 }));
@@ -61,15 +78,94 @@ const todayFiles = await cache.findKeysByDate("2024-01-15");
 const hotFiles = await cache.findKeysByAccessCount(10);
 ```
 
+### Legacy Constructor (Backward Compatible)
+
+```js
+// Traditional constructor still works
+const legacyCache = new CacheService("cache_dir", "100MB", "7d", "100KB", "json");
+```
+
 ---
 
 ## Constructor Configuration
+
+### Configuration Object Constructor (Recommended)
+
+```js
+const cache = new CacheService(config);
+```
+
+#### Configuration Object Properties
+
+| Property | Type | Description | Default |
+|----------|------|-------------|---------|
+| `cacheDir` | `string` | Directory path where cache files will be stored | `"cache"` |
+| `maxCacheSize` | `string \| number` | Maximum total cache size (supports B, KB, MB, GB, TB) | `"500MB"` |
+| `maxCacheAge` | `string \| number` | Maximum age for cache entries (supports ms, s, m, h, d, w) | `"7d"` |
+| `maxCacheKeySize` | `string \| number` | Maximum size for cache key data (supports B, KB, MB, GB, TB) | `"100KB"` |
+| `fileExtension` | `string` | File extension for cached files (e.g., `"json"`, `"txt"`, `"bin"`) | `"cache"` |
+| `metadataSaveDelayMs` | `number` | Batch metadata save delay in milliseconds | `100` |
+| `cutoffDateRecalcIntervalMs` | `number` | Cutoff date recalculation interval in milliseconds | `300000` (5 min) |
+| `floatingPointPrecision` | `number` | Floating point precision for hash normalization | `10` |
+| `healthCheckConsistencyThreshold` | `number` | Health check metadata consistency threshold percentage | `90` |
+| `largeCacheWarningThresholdBytes` | `number` | Large cache size warning threshold in bytes | `524288000` (500MB) |
+| `processMaxListenersIncrement` | `number` | Process max listeners increment for graceful shutdown | `10` |
+| `findKeyBatchSize` | `number` | Batch processing size for findKeyByValue operations | `15` |
+| `findAllKeysBatchSize` | `number` | Batch processing size for findAllKeysByValue operations | `20` |
+| `jsonIndentSpaces` | `number` | JSON stringify indentation spaces | `2` |
+| `sizeFormatDecimalPlaces` | `number` | Size formatting decimal places | `2` |
+| `timeFormatDecimalPlaces` | `number` | Time formatting decimal places | `2` |
+| `statsDecimalPlaces` | `number` | Statistics calculation decimal places | `10` |
+
+#### Configuration Examples
+
+```js
+// Minimal configuration (uses defaults for unspecified properties)
+const cache1 = new CacheService({
+	cacheDir: "my-cache",
+	maxCacheSize: "1GB",
+	maxCacheAge: "30d"
+});
+
+// Full custom configuration
+const cache2 = new CacheService({
+	cacheDir: "production-cache",
+	maxCacheSize: "2GB",
+	maxCacheAge: "7d",
+	maxCacheKeySize: "1MB",
+	fileExtension: "json",
+	metadataSaveDelayMs: 50,
+	cutoffDateRecalcIntervalMs: 60000, // 1 minute
+	floatingPointPrecision: 15,
+	healthCheckConsistencyThreshold: 95,
+	largeCacheWarningThresholdBytes: 100 * 1024 * 1024, // 100MB
+	processMaxListenersIncrement: 5,
+	findKeyBatchSize: 10,
+	findAllKeysBatchSize: 15,
+	jsonIndentSpaces: 4,
+	sizeFormatDecimalPlaces: 3,
+	timeFormatDecimalPlaces: 3,
+	statsDecimalPlaces: 15
+});
+
+// High-performance configuration
+const cache3 = new CacheService({
+	cacheDir: "fast-cache",
+	maxCacheSize: "500MB",
+	maxCacheAge: "1d",
+	metadataSaveDelayMs: 25, // Faster saves
+	findKeyBatchSize: 25, // Larger batches
+	findAllKeysBatchSize: 30
+});
+```
+
+### Legacy Constructor (Backward Compatible)
 
 ```js
 const cache = new CacheService(dirName, maxCacheSize, maxCacheAge, cacheKeyLimit, fileExtension);
 ```
 
-### Parameters
+#### Legacy Parameters
 
 | Parameter | Type | Description |
 |-----------|------|-------------|
@@ -79,7 +175,7 @@ const cache = new CacheService(dirName, maxCacheSize, maxCacheAge, cacheKeyLimit
 | `cacheKeyLimit` | `string \| number` | Maximum size for cache key data (supports B, KB, MB, GB, TB) |
 | `fileExtension` | `string` | File extension for cached files (e.g., `"json"`, `"txt"`, `"bin"`) |
 
-### Configuration Examples
+#### Legacy Configuration Examples
 
 ```js
 // Traditional numeric values (backward compatible)
@@ -417,7 +513,16 @@ Cache sizes above 500MB trigger warnings:
 ### API Response Caching
 
 ```js
-const apiCache = new CacheService("api_cache", "200MB", "1d", "50KB", "json");
+// Modern configuration approach
+const apiCache = new CacheService({
+	cacheDir: "api_cache",
+	maxCacheSize: "200MB",
+	maxCacheAge: "1d",
+	maxCacheKeySize: "50KB",
+	fileExtension: "json",
+	metadataSaveDelayMs: 50, // Faster saves for API responses
+	findKeyBatchSize: 20 // Optimized for API lookups
+});
 
 async function getApiData(endpoint) {
 	const cacheKey = `api_${endpoint}_${Date.now()}`;
@@ -441,7 +546,16 @@ async function getApiData(endpoint) {
 ### Session Management
 
 ```js
-const sessionCache = new CacheService("sessions", "50MB", "7d", "100KB", "json");
+// High-performance session cache
+const sessionCache = new CacheService({
+	cacheDir: "sessions",
+	maxCacheSize: "50MB",
+	maxCacheAge: "7d",
+	maxCacheKeySize: "100KB",
+	fileExtension: "json",
+	metadataSaveDelayMs: 25, // Very fast saves for sessions
+	cutoffDateRecalcIntervalMs: 60000 // Check expiration every minute
+});
 
 async function storeSession(sessionId, sessionData) {
 	await sessionCache.set({ type: "session", id: sessionId }, JSON.stringify(sessionData));
@@ -456,7 +570,18 @@ async function getSession(sessionId) {
 ### File Processing Pipeline
 
 ```js
-const fileCache = new CacheService("processed_files", "1GB", "30d", "200KB", "bin");
+// Large file processing cache with custom settings
+const fileCache = new CacheService({
+	cacheDir: "processed_files",
+	maxCacheSize: "1GB",
+	maxCacheAge: "30d",
+	maxCacheKeySize: "200KB",
+	fileExtension: "bin",
+	metadataSaveDelayMs: 200, // Less frequent saves for large files
+	findKeyBatchSize: 10, // Smaller batches for large files
+	findAllKeysBatchSize: 15,
+	largeCacheWarningThresholdBytes: 2 * 1024 * 1024 * 1024 // 2GB warning threshold
+});
 
 async function processLargeFile(filePath) {
 	const fileHash = await generateFileHash(filePath);
@@ -564,6 +689,18 @@ setInterval(async () => {
 if (stats.usagePercentage > 90) {
 	await cache.updateCacheSize("2GB"); // Will trigger warning
 }
+
+// Performance tuning based on usage patterns
+const performanceCache = new CacheService({
+	cacheDir: "performance-cache",
+	maxCacheSize: "1GB",
+	maxCacheAge: "7d",
+	metadataSaveDelayMs: 25, // Faster saves
+	findKeyBatchSize: 30, // Larger batches for better throughput
+	findAllKeysBatchSize: 40,
+	cutoffDateRecalcIntervalMs: 30000, // More frequent expiration checks
+	healthCheckConsistencyThreshold: 95 // Stricter health checks
+});
 ```
 
 ---

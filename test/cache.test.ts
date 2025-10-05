@@ -1,4 +1,5 @@
 import { CacheService } from "../src/cache";
+import { CacheConfig, DEFAULT_CACHE_CONFIG } from "../src/types/cacheConfig";
 import * as fs from "fs/promises";
 import * as path from "path";
 
@@ -519,6 +520,118 @@ describe("CacheService", () => {
 			const foundKeys = await cache.findAllKeysByValue(binaryData);
 			expect(foundKeys).toHaveLength(1);
 			expect(typeof foundKeys[0]).toBe("string");
+		});
+	});
+
+	describe("Configuration System", () => {
+		it("should work with configuration object constructor", async () => {
+			const config: CacheConfig = {
+				...DEFAULT_CACHE_CONFIG,
+				cacheDir: "test-cache-config",
+				maxCacheSize: "2MB",
+				maxCacheAge: "2d",
+				maxCacheKeySize: "200KB",
+				fileExtension: "config-test",
+				metadataSaveDelayMs: 50,
+				floatingPointPrecision: 5
+			};
+
+			const configCache = new CacheService(config);
+			await new Promise(resolve => setTimeout(resolve, 100));
+
+			// Test basic functionality
+			const testData = "Configuration test data";
+			const cacheKey = "config-test-key";
+
+			const setResult = await configCache.set(cacheKey, testData);
+			expect(setResult).toBe(true);
+
+			const retrieved = await configCache.get(cacheKey);
+			expect(retrieved).not.toBeNull();
+			expect(retrieved!.toString()).toBe(testData);
+
+			// Cleanup
+			await configCache.clearAll();
+		});
+
+		it("should maintain backward compatibility with legacy constructor", async () => {
+			// This test ensures the legacy constructor still works
+			const legacyCache = new CacheService("test-cache-legacy", 1, 1, 50, "legacy");
+			await new Promise(resolve => setTimeout(resolve, 100));
+
+			const testData = "Legacy test data";
+			const cacheKey = "legacy-test-key";
+
+			const setResult = await legacyCache.set(cacheKey, testData);
+			expect(setResult).toBe(true);
+
+			const retrieved = await legacyCache.get(cacheKey);
+			expect(retrieved).not.toBeNull();
+			expect(retrieved!.toString()).toBe(testData);
+
+			// Cleanup
+			await legacyCache.clearAll();
+		});
+
+		it("should use default configuration when no config provided", async () => {
+			const defaultConfigCache = new CacheService({
+				cacheDir: "test-cache-default"
+			});
+
+			await new Promise(resolve => setTimeout(resolve, 100));
+
+			// Test that it uses default values
+			const stats = await defaultConfigCache.getStats();
+			expect(stats.maxSizeMB).toBe(500); // Default cache size
+			expect(stats.maxCacheAgeDays).toBe(7); // Default cache age
+
+			// Cleanup
+			await defaultConfigCache.clearAll();
+		});
+
+		it("should allow custom configuration values", async () => {
+			const customConfig: CacheConfig = {
+				...DEFAULT_CACHE_CONFIG,
+				cacheDir: "test-cache-custom",
+				maxCacheSize: "10MB",
+				maxCacheAge: "1d",
+				maxCacheKeySize: "1MB",
+				fileExtension: "custom",
+				metadataSaveDelayMs: 200,
+				cutoffDateRecalcIntervalMs: 60000, // 1 minute
+				floatingPointPrecision: 15,
+				healthCheckConsistencyThreshold: 95,
+				largeCacheWarningThresholdBytes: 100 * 1024 * 1024, // 100MB
+				processMaxListenersIncrement: 5,
+				findKeyBatchSize: 10,
+				findAllKeysBatchSize: 15,
+				jsonIndentSpaces: 4,
+				sizeFormatDecimalPlaces: 3,
+				timeFormatDecimalPlaces: 3,
+				statsDecimalPlaces: 15
+			};
+
+			const customCache = new CacheService(customConfig);
+			await new Promise(resolve => setTimeout(resolve, 100));
+
+			// Test that custom values are applied
+			const stats = await customCache.getStats();
+			expect(stats.maxSizeMB).toBe(10); // Custom cache size
+			expect(stats.maxCacheAgeDays).toBe(1); // Custom cache age
+
+			// Test functionality still works
+			const testData = "Custom config test";
+			const cacheKey = "custom-test-key";
+
+			const setResult = await customCache.set(cacheKey, testData);
+			expect(setResult).toBe(true);
+
+			const retrieved = await customCache.get(cacheKey);
+			expect(retrieved).not.toBeNull();
+			expect(retrieved!.toString()).toBe(testData);
+
+			// Cleanup
+			await customCache.clearAll();
 		});
 	});
 });

@@ -13,3 +13,4 @@ coverage/
 .idea/
 *.tmp
 *.swp
+test-inspect/

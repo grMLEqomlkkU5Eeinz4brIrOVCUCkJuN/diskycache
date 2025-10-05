@@ -475,6 +475,17 @@ export class CacheService {
 
 	async saveMetadata(immediate: boolean = false): Promise<void> {
 		try {
+			// Don't create metadata file if there's no data to save
+			if (this.metadata.size === 0) {
+				// If metadata file exists but we have no data, remove it
+				try {
+					await fs.unlink(this.metadataFile);
+				} catch (unlinkError) {
+					// Ignore if file doesn't exist
+				}
+				return;
+			}
+
 			// Ensure directory exists before writing metadata
 			await fs.mkdir(this.cacheDir, { recursive: true });
 			const metadataArray = Array.from(this.metadata.entries());
@@ -610,6 +621,12 @@ export class CacheService {
 
 	async clearAll(): Promise<void> {
 		try {
+			// Clear any pending metadata save timers first
+			if (this.metadataSaveTimer) {
+				clearTimeout(this.metadataSaveTimer);
+				this.metadataSaveTimer = undefined;
+			}
+
 			const files = await fs.readdir(this.cacheDir);
 			const filesToClear = files.filter(file => file.endsWith(this.fileExtention));
 			for (const file of filesToClear) {

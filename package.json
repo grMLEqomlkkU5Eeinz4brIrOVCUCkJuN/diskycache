@@ -18,12 +18,12 @@
 	"license": "MIT",
 	"repository": {
 		"type": "git",
-		"url": "https://github.com/your-org/diskycache.git"
+		"url": "https://github.com/grMLEqomlkkU5Eeinz4brIrOVCUCkJuN/diskycache.git"
 	},
 	"bugs": {
-		"url": "https://github.com/your-org/diskycache/issues"
+		"url": "https://github.com/grMLEqomlkkU5Eeinz4brIrOVCUCkJuN/diskycache/issues"
 	},
-	"homepage": "https://github.com/your-org/diskycache#readme",
+	"homepage": "https://github.com/grMLEqomlkkU5Eeinz4brIrOVCUCkJuN/diskycache#readme",
 	"module": "dist/index.js",
 	"main": "dist/index.js",
 	"types": "dist/index.d.ts",

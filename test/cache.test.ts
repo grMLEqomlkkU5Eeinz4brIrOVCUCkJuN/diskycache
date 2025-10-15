@@ -558,6 +558,42 @@ describe("CacheService", () => {
 			expect(foundKey).toBeTruthy();
 		});
 
+		describe("JSON Helpers", () => {
+			it("should set and get JSON with types", async () => {
+				const key = { type: "json", id: "1" };
+				const value = { id: 1, name: "Alice", active: true };
+
+				const setOk = await cache.setJSON(key, value);
+				expect(setOk).toBe(true);
+
+				const retrieved = await cache.getJSON<typeof value>(key);
+				expect(retrieved).toEqual(value);
+			});
+
+			it("should return null when JSON entry missing", async () => {
+				const missing = await cache.getJSON<{ id: number }>("does-not-exist");
+				expect(missing).toBeNull();
+			});
+
+			it("should handle circular data serialization error in setJSON", async () => {
+				const key = { type: "json", id: "circular" };
+				const circular: any = { a: 1 };
+				circular.self = circular;
+
+				const setOk = await cache.setJSON(key, circular);
+				expect(setOk).toBe(false);
+			});
+
+			it("should handle invalid JSON content in getJSON", async () => {
+				const key = { type: "json", id: "invalid" };
+				// Write an invalid JSON string deliberately
+				await cache.set(key, "{ invalid json");
+
+				const parsed = await cache.getJSON(key);
+				expect(parsed).toBeNull();
+			});
+		});
+
 		it("should handle large values efficiently", async () => {
 			const largeData = "x".repeat(10000); // 10KB string
 			const cacheKey = "large-key";

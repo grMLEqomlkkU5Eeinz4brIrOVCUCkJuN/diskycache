@@ -918,6 +918,33 @@ export class CacheService {
 	}
 
 	/**
+	 * Convenience helper to store JSON-serializable data.
+	 */
+	async setJSON(keyData: string | Record<string, any>, data: unknown): Promise<boolean> {
+		try {
+			const json = JSON.stringify(data);
+			return await this.set(keyData, json);
+		} catch (error) {
+			console.error("Error serializing JSON for cache entry", error);
+			return false;
+		}
+	}
+
+	/**
+	 * Convenience helper to retrieve and parse JSON data.
+	 */
+	async getJSON<T = unknown>(keyData: string | Record<string, any>): Promise<T | null> {
+		const buffer = await this.get(keyData);
+		if (!buffer) return null;
+		try {
+			return JSON.parse(buffer.toString()) as T;
+		} catch (error) {
+			console.error("Error parsing JSON from cache entry", error);
+			return null;
+		}
+	}
+
+	/**
 	 * Adds an entry to all relevant indexes
 	 */
 	private addToIndexes(cacheKey: string, metadata: cacheTypes.CacheMetaData, contentHash?: string): void {
